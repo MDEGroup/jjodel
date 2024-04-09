@@ -110,19 +110,21 @@ export class OCL extends RuntimeAccessibleClass{
         view = view0?.__raw || view0;
         let oclCondition = view.oclCondition;
         let tv = transientProperties.view[view.id];
-        console.log("Evaluating ocl:"+view.oclCondition, {view, ocl:view.oclCondition});
+        console.log("Evaluating ocl: "+view.oclCondition, {view, ocl:view.oclCondition});
         if (!view.oclCondition) { return true; }
 
         let oclEngine: OclEngine;
         if (!tv) transientProperties.view[view.id] = tv = {} as any;
         if (tv.oclEngine) oclEngine = tv.oclEngine;
         else {
+            windoww.OclEngine = OclEngine;
             tv.oclEngine = oclEngine = OclEngine.create();
             let state: DState = store.getState();
             let rootModel: DModel = mp as any;
             while (rootModel && rootModel.className !== "DModel") rootModel = DPointerTargetable.fromPointer(rootModel.father, state);
             oclEngine.registerTypes(RuntimeAccessibleClass.getOCLClasses(rootModel.id));
             oclEngine.addOclExpression(oclCondition);
+            console.log("4 Evaluating ocl: "+view.oclCondition, {view, ocl:view.oclCondition, mp, lmp, oclEngine});
         }
         try {
             let oclResult: OclResult;
@@ -136,8 +138,9 @@ export class OCL extends RuntimeAccessibleClass{
             }
             else oclResult = oclEngine.evaluate(lmp);
 
+            console.log("5 Evaluating ocl: "+view.oclCondition, {view, ocl:view.oclCondition, mp, lmp, oclResult, oclEngine});
             // return oclResult ? OCL.getOCLScore(oclCondition) : ViewEClassMatch.MISMATCH_OCL;
-            return oclResult ? true : ViewEClassMatch.MISMATCH_OCL;
+            return (oclResult as any)?.result ? true : ViewEClassMatch.MISMATCH_OCL;
         } catch(e) {
             Log.ee('failed to evalute OCL expression:', {e, obj: mp, view: view.name, oclexp: view.oclCondition, node});
             return ViewEClassMatch.MISMATCH_OCL;

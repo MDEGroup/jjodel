@@ -240,6 +240,7 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
                 let edgeStateProps: EdgeStateProps = ret as EdgeStateProps;
                 let startnodeid = LGraphElement.getNodeId(edgeOwnProps.start);
                 let endnodeid = LGraphElement.getNodeId(edgeOwnProps.end);
+                let anchorStart = edgeOwnProps.anchorStart todo: ceck type correctness and store it in DEdge with anchorEnd too
                 if (!startnodeid) {
                     startnodeid = LGraphElement.getNodeId(ret.data);
                 }

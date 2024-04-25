@@ -12,7 +12,7 @@ import { Polygon, Circle, Cross, Decagon,
 } from  "../graph/vertex/Shapes";
 import {DefaultNode, DefaultNodeComponent} from "../graph/defaultNode/DefaultNode"; // require graphelement
 import {GraphsContainer, GraphsContainerComponent} from "../graph/graph/graphContainer"; // require vertex, graph
-import {Edge, EdgeComponent} from "../graph/damedges/damedge";
+import {Edge, EdgeComponent} from "../graph/edges/edge";
 import {GenericInput} from "../components/forEndUser/GenericInput"
 import {U} from "./index";
 // exports graphelements
@@ -25,7 +25,7 @@ export { Polygon, Circle, Cross, Decagon,
 } from  "../graph/vertex/Shapes";
 export {DefaultNode, DefaultNodeComponent} from "../graph/defaultNode/DefaultNode"; // require graphelement
 export {GraphsContainer, GraphsContainerComponent} from "../graph/graph/graphContainer"; // require vertex, graph
-export {Edge, EdgeComponent,} from "../graph/damedges/damedge";
+export {Edge, EdgeComponent,} from "../graph/edges/edge";
 export {GenericInput} from "../components/forEndUser/GenericInput"
 // other exports
 //export {DockLayoutComponent} from "../components/abstract/DockLayoutComponent";

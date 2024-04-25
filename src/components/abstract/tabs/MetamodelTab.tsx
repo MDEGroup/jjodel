@@ -17,7 +17,7 @@ import ToolBar from "../../toolbar/ToolBar";
 import ContextMenu from "../../contextMenu/ContextMenu";
 
 function PendingEdge(props: any){ return <>{
-    /* todo: <DamEdge start={store.getState().pendingEdge.start} end={} />*/}</>
+    /* todo: <Edge start={store.getState().pendingEdge.start} end={} />*/}</>
 }
 
 function MetamodelTabComponent(props: AllProps) {

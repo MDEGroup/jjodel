@@ -365,8 +365,7 @@ export abstract class RuntimeAccessibleClass extends AbstractMixedClass {
         while (rootModel && rootModel.className !== "DModel") rootModel = DPointerTargetable.fromPointer(rootModel.father, state);
         let mid: Pointer<DModel> = rootModel?.id; // NB: for EBoolean etc, primitive type meteclasses don't have a model;
         if (!RuntimeAccessibleClass.OCL_Constructors[mid]) {
-            RuntimeAccessibleClass.OCL_Constructors[mid] = {};
-            RuntimeAccessibleClass.OCL_Constructors[mid].__proto__ = RuntimeAccessibleClass.classes;
+            RuntimeAccessibleClass.OCL_Constructors[mid] = {...RuntimeAccessibleClass.classes};
         }
         const OclConstructor: GObject = data;
         let namefixed: string;
@@ -386,6 +385,7 @@ export abstract class RuntimeAccessibleClass extends AbstractMixedClass {
     }
 
     static getOCLClasses(model_id: Pointer<DModel>): GObject {
+        // return { ...(RuntimeAccessibleClass.OCL_Constructors[model_id] || {}), ...RuntimeAccessibleClass.classes}
         return RuntimeAccessibleClass.OCL_Constructors[model_id] || RuntimeAccessibleClass.classes;
     }
 }

@@ -121,6 +121,7 @@ export class OCL extends RuntimeAccessibleClass{
             tv.oclEngine = oclEngine = OclEngine.create();
             let state: DState = store.getState();
             let rootModel: DModel = mp as any;
+            windoww.rootModel = rootModel;
             while (rootModel && rootModel.className !== "DModel") rootModel = DPointerTargetable.fromPointer(rootModel.father, state);
             oclEngine.registerTypes(RuntimeAccessibleClass.getOCLClasses(rootModel.id));
             oclEngine.addOclExpression(oclCondition);
@@ -137,10 +138,13 @@ export class OCL extends RuntimeAccessibleClass{
                 transientProperties.modelElement[mp.id].node = oldNode;
             }
             else oclResult = oclEngine.evaluate(lmp);
+            windoww.oclDebug={oclResult, oclEngine, lmp, oclCondition};
 
             console.log("5 Evaluating ocl: "+view.oclCondition, {view, ocl:view.oclCondition, mp, lmp, oclResult, oclEngine});
             // return oclResult ? OCL.getOCLScore(oclCondition) : ViewEClassMatch.MISMATCH_OCL;
-            return (oclResult as any)?.result ? true : ViewEClassMatch.MISMATCH_OCL;
+
+            let matches: boolean = oclResult && oclResult.getEvaluatedContexts().length > 0 && oclResult.getResult();
+            return matches || ViewEClassMatch.MISMATCH_OCL;
         } catch(e) {
             Log.ee('failed to evalute OCL expression:', {e, obj: mp, view: view.name, oclexp: view.oclCondition, node});
             return ViewEClassMatch.MISMATCH_OCL;
@@ -148,8 +152,11 @@ export class OCL extends RuntimeAccessibleClass{
         // oclEngine.setTypeDeterminer()
     }
 
+    // warning: do not read ret.result with returntype='ocl'
+    // it neeeds to be evaluated both with  ret.getEvaluatedContexts().length > 0 && ret.getResult();
     private static filter0<T extends GObject>(keepIndex: boolean, returnType: 'ocl' | 'bool' | 'src', obj0: T[], oclexp: string, typeused: Constructor[]=[]) {
         var oclEngine = OclEngine.create();
+        windoww.oclEngine = oclEngine;
         var oclResult = null;
         const typeregister: GObject = {};
         for (let type of typeused) { typeregister[(type as any as typeof RuntimeAccessibleClass).cname || type.name] = type; }
@@ -169,6 +176,41 @@ export class OCL extends RuntimeAccessibleClass{
             let bool = res && res.getEvaluatedContexts().length > 0 && res.getResult();
             if (returnType === 'bool') ret[i] = bool;
             else ret[i] = bool ? obj[i] : undefined;
+        }
+
+        if (!keepIndex) {
+            ret = (ret).filter((r:any) => !!r) as any;
+        }
+
+        return ret;
+    }
+
+
+
+
+    public static filter_old<T extends GObject>(keepIndex: boolean, returnType: 'ocl' | 'bool' | 'src', obj0: T[], oclexp: string, typeused: Constructor[]=[]) {
+        windoww.OclEngine = OclEngine;
+        var oclEngine = OclEngine.create();
+        var oclResult = null;
+        const typeregister: GObject = {};
+        for (let type of typeused) { typeregister[(type as any as typeof RuntimeAccessibleClass).cname || type.name] = type; }
+        oclEngine.registerTypes(typeregister);
+        if (!oclexp) oclexp = "context Persona inv: self.age>0";
+        oclEngine.addOclExpression(oclexp);
+
+        let obj: GObject[] = obj0;
+        let ret: ((OclResult | boolean) | (GObject | null))[] = [];
+
+        for (let i = 0; i < obj.length; i++) {
+            let res: OclResult | null;
+            try { res = oclEngine.evaluate(obj[i]); }
+            catch(e) { console.error('failed to evalute object:', {e}); res = null; }
+            if (returnType === 'ocl') {
+                ret[i] = res;
+                continue; }
+            let bool = res && res.getEvaluatedContexts().length > 0 && res.getResult();
+            if (returnType === 'bool') ret[i] = bool;
+            else ret[i] = bool ? obj[i] : null;
         }
 
         if (!keepIndex) {

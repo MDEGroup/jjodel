@@ -809,8 +809,8 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         let endid: DGraphElement["id"] = (windoww.LGraphElement as typeof LGraphElement).getNodeId(end);
         Log.ex(!startid || !endid, "cannot create an edge without start or ending nodes", {start, end, startid, endid});
         thiss.midnodes = [];
-        thiss.anchorStart = '0';
-        thiss.anchorEnd = '0';
+        // thiss.anchorStart = '0';
+        // thiss.anchorEnd = '0';
         thiss.midPoints = []; // the logic part which instructs to generate the midnodes
         // if (!thiss.model && isDModelElementPointer(startid)) thiss.model = startid;
         // thiss.labels = undefined;
@@ -838,7 +838,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss.edgesIn = [];
         thiss.edgesOut = [];
         thiss.state = {id: thiss.id+".state", className: thiss.className};
-        thiss.anchors = {'0':{x:0.5, y:0.5}, '1':{x:0.5, y:0}, '2':{x:1, y:0.5}, '3':{x:0.5, y:1}, '4':{x:0, y:0.5}} as any;
+        // thiss.anchors = {'0':{x:0.5, y:0.5}, '1':{x:0.5, y:0}, '2':{x:1, y:0.5}, '3':{x:0.5, y:1}, '4':{x:0, y:0.5}} as any;
 
         this.setPtr("model", model);
         this.setPtr("graph", parentgraphID);

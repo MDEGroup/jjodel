@@ -297,7 +297,7 @@ function makeDefaultGraphViews(vp: Pointer<DViewPoint>, validationVP: Pointer<DV
     }
 }
 `
-        }, false, validationVP, 'Pointer_ViewCheckName' );
+        }, false, vp, 'Pointer_ViewCheckName' );
     let errorCheckName: DViewElement = DViewElement.new2('Naming error view', DV.invisibleJsx(), (v) => {
         v.isExclusiveView = false;
         v.usageDeclarations = "(ret)=>{ // scope: data, node, view, state, \n" +
@@ -437,7 +437,7 @@ node.state.errors = {...node.state.errors, naming: err};
 
     let dv_subviews = [DefaultViews.model(vp), DefaultViews.package(vp), DefaultViews.class(vp), DefaultViews.enum(vp),
         DefaultViews.attribute(vp), DefaultViews.reference(vp), DefaultViews.operation(vp),
-        DefaultViews.literal(vp), DefaultViews.object(vp), DefaultViews.value(vp), voidView, ...edgeViews, edgePointView];
+        DefaultViews.literal(vp), DefaultViews.object(vp), DefaultViews.value(vp), voidView, ...edgeViews, edgePointView, anchorView];
 
     let validation_subviews = [errorOverlayView, errorCheckLowerbound, errorCheckName];
     // SetFieldAction.new(vp, 'subViews', U.objectFromArrayValues(dv_subviews.map(dv=>dv.id), 1.5));

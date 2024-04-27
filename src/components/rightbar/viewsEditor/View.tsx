@@ -1,6 +1,6 @@
 import React, {Dispatch, ReactElement} from 'react';
-import type {LViewElement} from '../../../joiner';
-import {DState, DUser, LProject, LUser, LViewPoint, Defaults} from "../../../joiner";
+import type {DViewElement, LViewElement, Pointer} from '../../../joiner';
+import {DState, DUser, LProject, LUser, LViewPoint, Defaults, LPointerTargetable} from "../../../joiner";
 import InfoData from './data/InfoData';
 import NodeData from './data/NodeData';
 import TemplateData from './data/TemplateData';
@@ -29,17 +29,17 @@ function ViewDataComponent(props: AllProps) {
     const layout: LayoutData = {dockbox: {mode: 'horizontal', children: []}};
     let i = 1;
     const tabs = [
-        {id: ''+i++, title: 'Overview', group: '1', closable: false, content: <InfoData view={view} viewpoints={viewpoints} readonly={readOnly} />},
-        {id: ''+i++, title: 'Template', group: '1', closable: false, content: <TemplateData view={view} readonly={readOnly} />},
+        {id: ''+i++, title: 'Overview', group: '1', closable: false, content: <InfoData viewID={view.id} viewpointsID={viewpoints.map(vp => vp.id)} readonly={readOnly} />},
+        {id: ''+i++, title: 'Template', group: '1', closable: false, content: <TemplateData viewID={view.id} readonly={readOnly} />},
         {id: ''+i++, title: 'Palette/Css', group: '1', closable: false, content: <PaletteData viewID={view.id} readonly={readOnly} />},
         {id: ''+i++, title: 'Events', group: '1', closable: false, content: <EventsData viewID={view.id} readonly={readOnly} />},
-        {id: ''+i++, title: 'Node behaviour', group: '1', closable: false, content: <NodeData view={view} readonly={readOnly} />},
+        {id: ''+i++, title: 'Node behaviour', group: '1', closable: false, content: <NodeData viewID={view.id} readonly={readOnly} />},
     ];
     if(view.appliableTo === 'edge') tabs.push(
-        {id: ''+i++, title: 'Edge', group: '1', closable: false, content: <EdgeData view={view} readonly={readOnly} />}
+        {id: ''+i++, title: 'Edge', group: '1', closable: false, content: <EdgeData viewID={view.id} readonly={readOnly} />}
     );
     if(view.appliableTo === 'edgePoint') tabs.push(
-        {id: ''+i++, title: 'EdgePoint', group: '1', closable: false, content: <EdgePointData view={view} readonly={readOnly} />}
+        {id: ''+i++, title: 'EdgePoint', group: '1', closable: false, content: <EdgePointData viewID={view.id} readonly={readOnly} />}
     );
     tabs.push({id: ''+i++, title: 'Sub Views', group: '1', closable: false, content: <SubViewsData viewID={view.id} readonly={readOnly} setSelectedView={props.setSelectedView} />});
     layout.dockbox.children.push({tabs});
@@ -51,14 +51,15 @@ function ViewDataComponent(props: AllProps) {
                 <i className={'p-1 bi bi-arrow-left'}></i>
             </button>
         </div>
-        <DockLayout defaultLayout={layout} style={{position: 'absolute', left: 10, top: 40, right: 10, bottom: 10}} />
+        <DockLayout defaultLayout={layout} style={{position: 'absolute', left: 10, top: 40, right: 10, bottom: 10, marginBottom: "20px"}} />
     </div>);
 }
 interface OwnProps {
-    view: LViewElement;
+    viewid: Pointer<DViewElement>;
     setSelectedView: React.Dispatch<React.SetStateAction<LViewElement | undefined>>;// (val: LViewElement | undefined) => {}
 }
 interface StateProps {
+    view: LViewElement;
     project: LProject;
     viewpoints: LViewPoint[];
     debug: boolean;
@@ -72,6 +73,7 @@ function mapStateToProps(state: DState, ownProps: OwnProps): StateProps {
     ret.project = user.project as LProject;
     ret.viewpoints = ret.project.viewpoints;
     ret.debug = state.debug;
+    ret.view = LPointerTargetable.fromPointer(ownProps.viewid, state);
     return ret;
 }
 

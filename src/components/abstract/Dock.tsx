@@ -6,6 +6,7 @@ import {FakeStateProps} from '../../joiner/types';
 import {DockLayout, LayoutData} from 'rc-dock';
 import TestTab from './tabs/TestTab';
 import StructureEditor from '../rightbar/structureEditor/StructureEditor';
+import {ModelMetaData} from '../rightbar/structureEditor/ModelMetaData';
 import TreeEditor from '../rightbar/treeEditor/treeEditor';
 import ViewsEditor from '../rightbar/viewsEditor/ViewsEditor';
 import NodeEditor from '../rightbar/styleEditor/StyleEditor';
@@ -14,6 +15,7 @@ import CollaboratorsEditor from '../rightbar/collaboratorsEditor/CollaboratorsEd
 import Console from '../rightbar/console/Console';
 import ModelsSummaryTab from './tabs/ModelsSummaryTab';
 import DockManager from './DockManager';
+import MqttEditor from "../rightbar/mqtt/MqttEditor";
 
 function DockComponent(props: AllProps) {
     const groups = {
@@ -25,24 +27,31 @@ function DockComponent(props: AllProps) {
     const ModelsSummary = {id: '0', title: 'Summary', group: 'models', closable: false, content: <ModelsSummaryTab />};
 
     /* Editors */
-    const test = {id: '999', title: 'Test', group: 'editors', closable: false, content: <TestTab />};
-    const structure = {id: '1', title: 'Structure', group: 'editors', closable: false, content: <StructureEditor />};
-    const tree = {id: '2', title: 'Tree View', group: 'editors', closable: false, content: <TreeEditor />};
-    const views = {id: '3', title: 'Views', group: 'editors', closable: false, content: <ViewsEditor />};
-    const node = {id: '4', title: 'Node', group: 'editors', closable: false, content: <NodeEditor />};
-    const viewpoints = {id: '6', title: 'Viewpoints', group: 'editors', closable: false, content: <ViewpointEditor />};
-    const collaborators = {id: '7', title: 'Collaborators', group: 'editors', closable: false, content: <CollaboratorsEditor />};
-    const console = {id: '8', title: 'Console', group: 'editors', closable: false, content: <Console />};
+    let index = 1;
+    const test = {id: `${index++}`, title: 'Test', group: 'editors', closable: false, content: <TestTab />};
+    const structure = {id: `${index++}`, title: 'Structure', group: 'editors', closable: false, content: <StructureEditor />};
+    const metadata = {id: `${index++}`, title: 'Metadata', group: 'editors', closable: false, content: <ModelMetaData />};
+    const tree = {id: `${index++}`, title: 'Tree View', group: 'editors', closable: false, content: <TreeEditor />};
+    const views = {id: `${index++}`, title: 'Views', group: 'editors', closable: false, content: <ViewsEditor />};
+    const node = {id: `${index++}`, title: 'Node', group: 'editors', closable: false, content: <NodeEditor />};
+    const viewpoints = {id: `${index++}`, title: 'Perspectives', group: 'editors', closable: false, content: <ViewpointEditor validation={false} />};
+    const validation = {id: `${index++}`, title: 'Validation', group: 'editors', closable: false, content: <ViewpointEditor validation={true} />};
+    const collaborators = {id: `${index++}`, title: 'Collaborators', group: 'editors', closable: false, content: <CollaboratorsEditor />};
+    const mqtt = {id: `${index++}`, title: 'Mqtt', group: 'editors', closable: false, content: <MqttEditor />};
+    const console = {id: `${index++}`, title: 'Console', group: 'editors', closable: false, content: <Console />};
 
     const layout: LayoutData = {dockbox: {mode: 'horizontal', children: []}};
     layout.dockbox.children.push({tabs: [ModelsSummary]});
     layout.dockbox.children.push({tabs: [
         structure,
+        metadata,
         tree,
-        node,
         views,
         viewpoints,
-        collaborators,
+        validation,
+        // collaborators,
+        // mqtt,
+        node,
         console
     ]});
 

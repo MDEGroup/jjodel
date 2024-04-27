@@ -183,9 +183,9 @@ export class DState extends DPointerTargetable{
 
     static init(store?: DState): void {
         BEGIN()
-        // const viewpoint = DViewPoint.new('Default', '', undefined, '', '', '', [], '', 0, false);
-        const viewpoint = DViewPoint.new2('Default', '', ()=>{}, true, 'Pointer_ViewPointDefault');
-        const validationViewpoint = DViewPoint.new2('Validation', '', ()=>{}, true, 'Pointer_ViewPointValidation');
+        const viewpoint = DViewPoint.new2('Default', '', (vp)=>{ vp.isExclusiveView = false; }, true, 'Pointer_ViewPointDefault');
+        const validationViewpoint = DViewPoint.new2('Validation default', '', (vp)=>{ vp.isExclusiveView = false; vp.isValidation = true;}, true, 'Pointer_ViewPointValidation');
+
         Log.exDev(viewpoint.id !== Defaults.viewpoints[0], "wrong vp id initialization", {viewpoint, def:Defaults.viewpoints});
         const views: DViewElement[] = makeDefaultGraphViews(viewpoint.id, validationViewpoint.id);
 
@@ -218,42 +218,168 @@ export class DState extends DPointerTargetable{
     }
 }
 
+function makeDefaultZoomView(vp: Pointer<DViewPoint>): void{
+    // let viewsMap = U.objectFromArray(defaultViews, (v) => v.id);
+/*
+* power levels:
+*
+* 3 parameters
+* 2 attributes
+* 1 classes
+* 0 packages only
+* */
+
+    let vnames = ['EdgePoint', 'Model', 'Package', 'Class', 'Enum', 'Attribute', 'Reference', 'Operation', 'Object', 'Value'];
+    let jsxList: Dictionary<string, string> = {
+            // 'EdgePoint': ``
+            'Model':
+`<div className={'root'}>
+    {!data && "Model data missing."}
+    <label style={{position:'absolute', right:'-50px', top:'50px', display: 'flex', transform: 'rotate(270deg)'}}>
+        <input className="potenziometro" onChange={(e)=>{node.state = {level:+e.target.value}}} min="0" max="3" type="range" step="1" value={level}
+            style = {{}}/>
+            <div style={{transform: 'rotate(90deg) translate(0, 100%)'}}>Detail level:{level}</div>
+    </label>
+    <div className={'edges'}>
+        {[
+            refEdges.map(se => <Edge start={se.start.father.node} end={se.end.node} view={'Pointer_ViewEdge' + ( se.start.containment && 'Composition' || 'Association')} key={'REF_' + se.start.node.id + '~' + se.end.node.id} />), 
+            extendEdges.map(se => <Edge start={se.start} end={se.end} view={'Pointer_ViewEdgeInheritance'} key={'EXT_' + se.start.node.id + '~' + se.end.node.id} />)
+        ]}
+    </div>
+    {otherPackages.filter(p => p).map(pkg => <DefaultNode key={pkg.id} data={pkg} />)}
+    {level >= 1 && firstPackage && firstPackage.children.filter(c => c).map(classifier => <DefaultNode key={classifier.id} data={classifier} />)}
+    {level >= 1 && m1Objects.filter(o => o).map(m1object => <DefaultNode key={m1object.id} data={m1object} />)}
+    {decorators}
+</div>`,
+            'Package':
+`<div className={'root package'}>
+
+    <div className={'package-children'}>
+        {upperLevel >= 1 ? [
+            <label style={{position:'absolute', right:'-50px', top:'50px', display: 'flex', transform: 'rotate(270deg)'}}>
+                <input className="potenziometro" onChange={(e)=>{node.state = {level:+e.target.value}}} min="0" max="3" type="range" step="1" value={level}
+                    style = {{}}/>
+                <div style={{transform: 'rotate(90deg) translate(0, 100%)'}}>Detail level:{level}</div>
+            </label>,
+            data.children.map(c => <DefaultNode key={c.id} data={c} />)
+            ] :
+        [
+            <div className={""}><b>Uri:</b><span className={"ms-1"}>{data.uri}</span></div>,
+            <div className={""}>{[
+                data.classes.length ? data.classes.length + " classes" : '',
+                data.enumerators.length ? data.enumerators.length + " enumerators" : ''
+               ].filter(v=>!!v).join(',')}</div>
+        ]
+        }
+    </div>
+    {decorators}
+</div>`,
+            'Class':
+`<div className={'root class'}>
+    <Input jsxLabel={<b className={'class-name'}>EClass:</b>} data={data} field={'name'} hidden={true} autosize={true} />
+    <hr/>
+    <div className={'class-children'}>
+        {level >= 2 && [
+            data.attributes.map(c => <DefaultNode key={c.id} data={c} />),
+            data.references.map(c => <DefaultNode key={c.id} data={c} />),
+            data.operations.map(c => <DefaultNode key={c.id} data={c} />)
+          ]
+         || [
+         <div className={""}><b>isInterface:</b><span className={"ms-1"}>{''+data.interface}</span></div>,
+         <div className={""}><b>isAbstract:</b><span className={"ms-1"}>{''+data.abstract}</span></div>,
+         <div className={""}><b>Instances:</b><span className={"ms-1"}>{data.instances.length}</span></div>,
+         <div className={""}>{[
+             data.attributes.length ? data.attributes.length + " attributes" : '',
+             data.references.length ? data.references.length + " references" : '',
+             data.operations.length ? data.operations.length + " operations" : ''
+            ].filter(v=>!!v).join(',')}</div>
+         ]
+        }
+    </div>
+    {decorators}
+</div>`,
+            'Enum':
+`<div className={'root enumerator'}>
+    <Input jsxLabel={<b className={'enumerator-name'}>EEnum:</b>} data={data} field={'name'} hidden={true} autosize={true} />
+    <hr />
+    <div className={'enumerator-children'}>
+        {level >= 2 && data.children.map(c => <DefaultNode key={c.id} data={c}/>)
+          || <div className={""}>{data.literals} literals</div>}
+    </div>
+    {decorators}
+</div>`,
+            'Operation':
+`<div className={'root w-100'}>
+    <Select className={'p-1 d-flex'} data={data} field={'type'} label={data.name + ' =>'} />
+    {data.exceptions.length ? " throws " + data.exceptions.join(", ") : ''}
+    <div className={"parameters"}>{
+        level >= 3 && data.parameters.map(p => <DefaultNode data={p} key={p.id} />)
+    }</div>
+    {decorators}
+</div>`,
+            'Object':
+`<div className={'root object'}>
+    <Input jsxLabel={<b className={'object-name'}>{data.instanceof ? data.instanceof.name : "Object"}:</b>}
+            data={data} field={'name'} hidden={true} autosize={true} />
+    <hr/>
+    <div className={'object-children'}>
+        {level >= 2 && features.map(f => <DefaultNode key={f.id} data={f} />)}
+    </div>
+    {decorators}
+</div>`
+    }
+
+    BEGIN();
+    let views: LViewElement[] = [];
+    for (let name in jsxList) {
+        let original = (LPointerTargetable.wrap('Pointer_View'+name as any) as LViewElement);
+        let doriginal = original.__raw;
+        let v = original.duplicate();
+        v.jsxString = jsxList[name];
+        const udLevel = 'ret.level = '+(["Model", "Package"].includes(name) ? 'node' : 'node.graph')+'.state.level ?? 3';
+        if (!doriginal.usageDeclarations) v.usageDeclarations = '(ret) => {\n' +
+            '// ** preparations and default behaviour here ** //\n' +
+            'ret.node = node\n' +
+            'ret.view = view\n' +
+            '// custom preparations:\n' +
+            '// data, node, view are dependencies by default. delete them above if you want to remove them.\n' +
+            '// add preparation code here (like for loops to count something), then list the dependencies below.\n' +
+            '// ** declarations here ** //\n' +
+            udLevel + (name === 'Package' ? '\nret.upperLevel = node.graph.state.level ?? 3\n' : '\n') +
+            '}';
+        else {
+            let ud = doriginal.usageDeclarations.split('\n');
+            let i = ud.indexOf('// ** declarations here ** //');
+            ud.splice(i+1, 0, udLevel);
+            if (name === 'Package') ud.splice(i+2, 0, 'ret.upperLevel = node.graph.state.level ?? 3');
+            v.usageDeclarations = ud.join('\n');
+        }/*
+        if (name === 'Model') {
+            v.onDataUpdate = 'node.state = {level: node.state.level || 0}'
+        }*/
+        views.push(v);
+    }
+    setTimeout(()=>{
+        for (let v of views){
+            (v as any).viewpoint = vp;
+        }
+    })
+    END();
+
+}
+(window as any).makeDefaultZoomView = makeDefaultZoomView;
 
 function makeDefaultGraphViews(vp: Pointer<DViewPoint>, validationVP: Pointer<DViewPoint>): DViewElement[] {
 
-    let errorOverlayView_old: DViewElement = DViewElement.new2('Semantic error view old', DV.semanticErrorOverlay_old(), (v) => {
-        v.appliableToClasses = [DAttribute.cname]; // [DValue.cname];
-        v.isExclusiveView = false;
-        v.css =
-`&.mainView { text-decoration-line: spelling-error; }
-&.decorativeView {
-    text-decoration-line: spelling-error;
-    
-    .overlap{
-      outline: 4px solid var(--background-3);
-      display: flex;
-    }
-    .error-message{
-        color: var(--color-3);
-        background: var(--background-3);
-        border-radius: 0 16px 16px 0;
-        margin: auto;
-        padding: 8px;
-        position:absolute;
-        top:50%; right:0;
-        transform: translate(calc(100% + 3px), calc(-50%));
-    }
-}`
-    }, false, validationVP, 'Pointer_ViewOverlayOld' );
-
     let errorOverlayView: DViewElement = DViewElement.new2('Semantic error view', DV.semanticErrorOverlay(), (v) => {
-        v.jsCondition = 'Object.values(node.state.errors || {}).join().length>0';
+        v.jsCondition = 'let nstate = node.state;\nObject.keys(nstate).filter(k => k.indexOf("error_")===0).map(k=>nstate[k]).join(\'\\n\').length>0';
         v.usageDeclarations = "(ret)=>{\n" +
         "// ** preparations and default behaviour here ** //\n" +
         "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
         "// ** declarations here ** //\n" +
-        "console.log('overlayView ud inner ' + data.name, {errs:node.state.errors, node, noder:node.r, data});\n" +
-        "ret.errors = Object.values(node.state.errors || {});\n" +
+        "// console.log('overlayView ud inner ' + data.name, {errs:node.state, node, noder:node.r, data});\n" +
+        "ret.nstate = node.state\n" +
+        "ret.errors = Object.keys(ret.nstate).filter(k => k.indexOf(\"error_\")===0).map(k=>ret.nstate[k])\n" +
         "\n}"
         v.isExclusiveView = false;
         v.css =
@@ -308,42 +434,31 @@ function makeDefaultGraphViews(vp: Pointer<DViewPoint>, validationVP: Pointer<DV
             "ret.type = data && data.className.substring(1) || 'shapeless';\n"+
             "}";
         v.onDataUpdate = `
-if (!node.state.errors) node.state.errors = {};
-let err = '';
-if (name.indexOf(" ") >= 0) err = "" + type + " names cannot contain white spaces.";
-else if (name.length === 0 && type !== "shapeless") err = type + "es must be named.";
+let err = undefined;
+//if (name.indexOf(" ") >= 0) err = "" + type + " names cannot contain white spaces."; else
+if (name.length === 0 && type !== "shapeless") err = type + "es must be named.";
 else if (!name[0].match(/[A-Za-z_$]/)) err = type + " names must begin with an alphabet letter or $_ symbols.";
-else if (!name.match(/[A-Za-z_$]+[A-Za-z0-9$_]+/)) err = type + " names can only contain an alphanumeric chars or or $_ symbols";
-console.log("measurable set naming error: "+err+", name:"+name, {err, name, dname:data.name, ddname:data.r.name});
-if (err) node.state.errors = {...node.state.errors, naming: err};
-else { let errors = {...(node.state.errors || {})}; delete errors['naming']; node.state.errors = errors; }
+else if (!name.match(/^[A-Za-z_$]+[A-Za-z0-9$_\\s]+$/)) err = type + " names can only contain an alphanumeric chars or or $_ symbols";
+node.state = {error_naming:err};
 `;}, false, validationVP, 'Pointer_ViewCheckName' );
 
 let errorCheckLowerbound: DViewElement = DViewElement.new2('Lowerbound error view', DV.invisibleJsx(), (v) => {
-            v.jsCondition = '(data, node)=> {\nnode.state.errors?.length>0';
+            // v.jsCondition = '(data, node)=> {\nnode.state.errors?.length>0';
             v.appliableToClasses = ['DValue'];
             v.isExclusiveView = false;
             v.usageDeclarations = "(ret)=>{ // scope: data, node, view, state, \n" +
                 "// ** preparations and default behaviour here ** //\n" +
                 "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
                 "// ** declarations here ** //\n" +
-                "ret.missingLowerbound = Math.min(0, data.lowerBound - data.values.length);\n" +
-                "ret.valuesLength = data.values.length;"+
+                "ret.valuesLength = data.values.filter(v=>(v!==undefined && v!=='')).length;\n"+
+                "ret.missingLowerbound = Math.max(0, data.lowerBound - ret.valuesLength);\n" +
                 "}";
             v.onDataUpdate = `
-if (!node.state.errors) node.state.errors = {};
-let err = '';
-if (missingLowerbound) node.state.errors = {...node.state.errors, lowerbound: (data.className.substring(1)) + " Lowerbound violation, missing ' + missingLowerbound + ' values.'."};
-node.state.errors = {...node.state.errors, naming: err};
+let err = undefined;\n
+if (missingLowerbound > 0) err = (data.className.substring(1))\n
+ \t\t+ ' Lowerbound violation, missing ' + missingLowerbound + ' values.';\n
+node.state = {error_lowerbound: err};\n
 `;
-        v.css =
-`&.mainView { text-decoration-line: spelling-error; }
-&.decorativeView {
-    [data-field="name"]{
-        text-decoration-line: spelling-error;
-        outline: 4px solid var(--background-3);
-     }
-}`
     }, false, validationVP, 'Pointer_ViewLowerbound' );
     // errorOverlayView.oclCondition = 'context DValue inv: self.value < 0';
 
@@ -361,17 +476,19 @@ node.state.errors = {...node.state.errors, naming: err};
     valuecolormap[ShortAttribETypes.EVoid] = "gray";
 
 
-    let voidView: DViewElement = DViewElement.new('Void', DV.voidView(), undefined, '', '', '', [], '', undefined, false, true, vp);
+    let voidView: DViewElement = DViewElement.new('Void', DV.voidView(), undefined, '', '', '',
+        [], '', undefined, false, true, vp);
     // voidView.appliableToClasses=["VoidVertex"];
     voidView.adaptWidth = true; voidView.adaptHeight = true;
 
-    let edgePointView: DViewElement = DViewElement.new('EdgePoint', DV.edgePointView(), new GraphSize(0, 0, 25, 25), '', '', '', [], '', undefined, false, true, vp);
+    let edgePointView: DViewElement = DViewElement.new('EdgePoint', DV.edgePointView(), new GraphSize(0, 0, 25, 25), '', '', '',
+        [], '', undefined, false, true, vp);
     edgePointView.appliableTo = 'edgePoint'; edgePointView.resizable = false;
     // edgePointView.edgePointCoordMode = CoordinateMode.relativePercent;
     edgePointView.edgePointCoordMode = CoordinateMode.absolute;
 
     let edgeViews: DViewElement[] = [];
-    let size0: GraphPoint = new GraphPoint(0, 0), size1: GraphPoint = new GraphPoint(20, 20), size2: GraphPoint = new GraphPoint(20, 20); // todo: riportalo in 40,20
+    let size0: GraphPoint = new GraphPoint(0, 0), size1: GraphPoint = new GraphPoint(20, 20), size2: GraphPoint = new GraphPoint(20, 20);
     let edgeConstants: string = "(ret)=>{\n" +
         "// ** preparations and default behaviour here ** //\n" +
         "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
@@ -436,7 +553,7 @@ node.state.errors = {...node.state.errors, naming: err};
     // nb: Error is not a view, just jsx. transform it in a view so users can edit it
 
     let dv_subviews = [DefaultViews.model(vp), DefaultViews.package(vp), DefaultViews.class(vp), DefaultViews.enum(vp),
-        DefaultViews.attribute(vp), DefaultViews.reference(vp), DefaultViews.operation(vp),
+        DefaultViews.attribute(vp), DefaultViews.reference(vp), DefaultViews.operation(vp), DefaultViews.parameter(vp),
         DefaultViews.literal(vp), DefaultViews.object(vp), DefaultViews.value(vp), voidView, ...edgeViews, edgePointView, anchorView];
 
     let validation_subviews = [errorOverlayView, errorCheckLowerbound, errorCheckName];

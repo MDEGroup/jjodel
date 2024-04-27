@@ -1,28 +1,14 @@
 import {OclEngine} from "@stekoe/ocl.js"
-import {OclResult} from "@stekoe/ocl.js/dist/components/OclResult";
-import {Utils} from "@stekoe/ocl.js/dist/components/Utils";
 import {
-    AbstractConstructor,
-    bool,
-    Constructor,
-    DGraphElement,
-    Dictionary,
-    DModel,
-    DModelElement, DPointerTargetable, DState,
-    DViewElement,
-    GObject,
-    LGraphElement,
+    Constructor, DGraphElement,
+    DModelElement, DViewElement,
+    GObject, LGraphElement,
     LModelElement,
-    LObject,
-    Log,
-    LPointerTargetable,
-    LValue,
     LViewElement,
     RuntimeAccessible,
-    RuntimeAccessibleClass,
-    store,
+    RuntimeAccessibleClass, ViewEClassMatch
 } from "../joiner";
-import {transientProperties, ViewEClassMatch} from "../joiner/classes";
+import {OclResult} from "@stekoe/ocl.js/dist/components/OclResult";
 
 let windoww = window as any;
 
@@ -35,9 +21,9 @@ export class Persona {
     constructor(public name: string='pname', public age: number=18, public isUnemployed: boolean=true){ Persona.all.push(this) }
 }
 
-@RuntimeAccessible('OCL')
-export class OCL extends RuntimeAccessibleClass{
+export class OCL{
     public static evaluate<T extends GObject>(obj0: T, constructor: Constructor<T>, oclexp: string, typeused: Constructor[]=[], oclEngine?: OclEngine): OclResult {
+        windoww.OclEngine = OclEngine;
         if (!oclEngine) {
             oclEngine = OclEngine.create();
             var oclResult = null;
@@ -71,32 +57,7 @@ export class OCL extends RuntimeAccessibleClass{
         return oclResult;
     }
 
-    public static filter<T extends GObject, M extends 'ocl' | 'bool' | 'src',
-        R extends (M extends 'ocl' ? (OclResult | undefined) : (M extends 'src' ? T | undefined : boolean))
-        >(keepIndex: boolean, returnType: M, obj0: T[], oclexp: string, typeused: Constructor[]=[]): R[] {
-        return OCL.filter0(keepIndex, returnType, obj0, oclexp, typeused) as any;
-    }
-
-    /* sandbox for when i will change dobject to have both type dobject and data.instanceof (his m2 class type)
-    public static init() {
-
-        OCL.Util.getClassName;
-        Utils.getClassName_original = Utils.getClassName;
-        Utils.getClassName = (obj: any) => {
-            let dobj = obj?.__raw || obj;
-            switch (dobj?.className)
-                default:  return Utils.getClassName_original(obj);
-                case DValue.cname:
-                case DObject.cname:
-                    return (obj as LObject | LValue).instanceof?.name || dobj.className;
-                    not good, i want DObjects to have both type DOBject and their obj.instanceof.name,.
-                    so after this i need to make a prototype of fake constructor for each metaclass having m2class.__proto__ = DObject; ?
-                    and every feature having fake constructor m2feature.__proto__ = DAttribute | DReference?
-        }
-    }*/
-    private static getOCLScore(ocl: string): number { return ocl.length; }
-
-    public static test(mp0: DModelElement | LModelElement | undefined, view0: LViewElement | DViewElement | undefined, node0?: LGraphElement | DGraphElement): boolean | (typeof ViewEClassMatch)["MISMATCH_OCL"] {
+    public static test_bugged_new(mp0: DModelElement | LModelElement | undefined, view0: LViewElement | DViewElement | undefined, node0?: LGraphElement | DGraphElement): boolean | (typeof ViewEClassMatch)["MISMATCH_OCL"] {
         if (!mp0 || !view0) return ViewEClassMatch.MISMATCH_OCL;
         let mp: DModelElement, lmp: LModelElement;
         let node: DGraphElement, lnode: LGraphElement;
@@ -151,46 +112,25 @@ export class OCL extends RuntimeAccessibleClass{
         }
         // oclEngine.setTypeDeterminer()
     }
+    public static test(me: DModelElement | LModelElement | undefined, view: LViewElement | DViewElement | undefined, node?: LGraphElement | DGraphElement): boolean | (typeof ViewEClassMatch)["MISMATCH_OCL"] {
+        if (!me || !view) return false;
+        const condition = view.oclCondition;
+        if (!condition) return true;
+        try {
+            const types = RuntimeAccessibleClass.getAllClasses();
+            return !!OCL.filter(true, 'src', [me], condition, types as any)[0];
+        } catch (e) {
+            return false
+        }
+
+    }
 
     // warning: do not read ret.result with returntype='ocl'
     // it neeeds to be evaluated both with  ret.getEvaluatedContexts().length > 0 && ret.getResult();
-    private static filter0<T extends GObject>(keepIndex: boolean, returnType: 'ocl' | 'bool' | 'src', obj0: T[], oclexp: string, typeused: Constructor[]=[]) {
-        var oclEngine = OclEngine.create();
-        windoww.oclEngine = oclEngine;
-        var oclResult = null;
-        const typeregister: GObject = {};
-        for (let type of typeused) { typeregister[(type as any as typeof RuntimeAccessibleClass).cname || type.name] = type; }
-        oclEngine.registerTypes(typeregister);
-        oclEngine.addOclExpression(oclexp);
-
-        let obj: T[] = obj0;
-        let ret: ((OclResult | boolean) | (GObject | undefined))[] = [];
-
-        for (let i = 0; i < obj.length; i++) {
-            let res: OclResult | undefined;
-            try { res = oclEngine.evaluate(obj[i]); }
-            catch(e) { console.error('failed to evalute OCL expression:', {e, obj, oclexp}); res = undefined; }
-            if (returnType === 'ocl') {
-                ret[i] = res;
-                continue; }
-            let bool = res && res.getEvaluatedContexts().length > 0 && res.getResult();
-            if (returnType === 'bool') ret[i] = bool;
-            else ret[i] = bool ? obj[i] : undefined;
-        }
-
-        if (!keepIndex) {
-            ret = (ret).filter((r:any) => !!r) as any;
-        }
-
-        return ret;
-    }
-
-
-
-
-    public static filter_old<T extends GObject>(keepIndex: boolean, returnType: 'ocl' | 'bool' | 'src', obj0: T[], oclexp: string, typeused: Constructor[]=[]) {
+    public static filter<T extends GObject>(keepIndex: boolean, returnType: 'ocl' | 'bool' | 'src', obj0: T[], oclexp: string, typeused: Constructor[]=[]) {
         windoww.OclEngine = OclEngine;
         var oclEngine = OclEngine.create();
+        windoww.oclEngine = oclEngine;
         var oclResult = null;
         const typeregister: GObject = {};
         for (let type of typeused) { typeregister[(type as any as typeof RuntimeAccessibleClass).cname || type.name] = type; }

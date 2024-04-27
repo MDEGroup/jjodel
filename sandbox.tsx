@@ -31,9 +31,22 @@ copy a class view, give it higher prio. it will not be applied.
 on view duplicate, css is not recompiled
 
 
+// todo: check oldprops.views-nextprops.views and always set shouldupdate to views newly introduced or remo**ved
+/**
 
+copy a class view, give it higher prio. it will not be applied.
+on view duplicate, css is not recompiled
+
+
+
+
+ when i manually assign a view (edge), tn.mainView is still undefined and this causes the console to crash.
+ */
 
 // need to merge file declarations? or use a filename such as the imports will work (use inmemory://? or real urls)
+// advanced mode and simple mode: hide some features like positional editor in simple mode or the entire tab in view/node, start in simple mode.
+// make .overlap.left .top .dow .right, .y-cemter, x-cemter, .cemter css selectors
+
 
 
 // syntax error on constants, usageDeclarations are not catched
@@ -41,6 +54,61 @@ on view duplicate, css is not recompiled
 /*reenable edge menù outside debug mode, (add color palette there? or not?)
 make uml arrows (and more common ones)
 *
+
+
+
+
+
+
+
+
+
+
+model: same im all graphs amd all imstamces
+mode+view: always differemt
+mode (- view): some views will share the mode positiom
+graph__
+
+
+will it chamge layout_
+
+diff imstamce           1                1                 1
+                        mv          m-v(curremt)         model
+chamge graph            1                1                 0
+chamge vp               0                0                 0
+chsmge mode view        1                0                 0
+
+
+                  chamge graph        chamge vp       chamge view
+model                   0                0                 0
+                        0                0                 1
+                        0                1                 0
+                        0                1                 1
+m-v                     1                0                 0
+m+v                     1                0                 1
+                        1                1                 0
+                        1                1                 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 * */
 // from this, either as a string or code, find a way to injectprops. as string regex with "Edge(" -> "Edge(nodeid," ?
 // pre-defining function Edge(...stuff) {return ActualEdgeComponent(nodeid, ...stuff) before the return React.createElement?
@@ -116,7 +184,8 @@ for (keys in []) gives "joinOriginal" and "separator"!!! i did not override the 
 
 // get final viewstack for a node, also updates OCL scores if needed because of a change in model or parentView (NOT from a change in view)
 
-// todo: actually inject generated color palette to css editor as prefix, so monaco editor knows them and can validate variable usage, but those lines are hidden in visual editor.
+// todo: actually inject generated color palette to css editor as prefix to monaco editor inner string contents,
+//  so monaco editor knows them and can validate variable usage, but those lines are hidden in visual editor.
 
 /*
 * verified! firing twice the same SetRootFieldAction("a", 1) does not change state twice, reducer returns old state.
@@ -125,7 +194,6 @@ for (keys in []) gives "joinOriginal" and "separator"!!! i did not override the 
 * */
 
 /*
-make sure error view display meaningful messages with code line
 * prevent megacrash if someone does <Vertex data={"not a pointer"} /> or <Vertex data={1, null, undefined...} />
 */
 // on rename model, update view using .$name, but only when ocl condition includes the pointer of the meta class. (directly or through instanceof, so when it's a non-generic view)

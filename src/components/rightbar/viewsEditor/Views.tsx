@@ -27,20 +27,26 @@ function ViewsDataComponent(props: AllProps) {
     const add = (e: MouseEvent) => {
         const jsx =`<div className={'root bg-white'}>Hello World!</div>`;
         let name = 'view_' + 0;
-        let names: string[] = project.views.map(v => v && v.name);
+        let names: string[] = vp.subViews.map(v => v && v.name);
         name = U.increaseEndingNumber(name, false, false, newName => names.indexOf(newName) >= 0);
         DViewElement.new(name, jsx);
     }
 
-
     const clone = (e: MouseEvent, v: LViewElement) => {
         e.preventDefault(); e.stopPropagation();
-        TRANSACTION(()=>{ v.duplicate(); })
+        TRANSACTION(() => {
+            v.duplicate(false);
+        });
     }
 
+    const destroy = (e: MouseEvent, view: LViewElement) => {
+        e.stopPropagation();
+        SetFieldAction.new(view.viewpoint.id, 'subViews', view.id as any, '-=', false);
+        view.delete();
+    }
 
     const state: DState = store.getState();
-    return(<div>
+    return(<div style={{maxHeight: "100%", overflow: "scroll", paddingBottom: "calc(42px + 15px)"}}>
         <div className={'d-flex p-2'}>
             <b className={'ms-1 my-auto'}>VIEWS</b>
             <button className={'btn btn-primary ms-auto'} onClick={add}>
@@ -68,7 +74,7 @@ function ViewsDataComponent(props: AllProps) {
                 <button className={'btn btn-success ms-1'} onClick={e => { clone(e, subview); e.stopPropagation(); }}>
                     <i className={'p-1 bi bi-clipboard2-fill'} />
                 </button>
-                <button onClick={e => { subview.delete(); e.stopPropagation(); }} className={'btn btn-danger ms-1'} disabled={Defaults.check(subview.id)}>
+                <button onClick={e => destroy(e, subview)} className={'btn btn-danger ms-1'} disabled={Defaults.check(subview.id)}>
                     <i className={'p-1 bi bi-trash3-fill'} />
                 </button>
             </div>
@@ -96,7 +102,6 @@ function mapDispatchToProps(dispatch: Dispatch<any>): DispatchProps {
     const ret: DispatchProps = {};
     return ret;
 }
-
 
 export const ViewsDataConnected = connect<StateProps, DispatchProps, OwnProps, DState>(
     mapStateToProps,

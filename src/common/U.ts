@@ -1,35 +1,24 @@
 // import * as detectzoooom from 'detect-zoom'; alternative: https://www.npmjs.com/package/zoom-level
-import React, {ReactElement} from "react";
 // import {Mixin} from "ts-mixer";
 import type {AbstractConstructor, Constructor, Dictionary, GObject, Pointer, Temporary} from "../joiner";
 import {
-    CreateElementAction,
-    DAttribute,
     DClassifier,
-    DLog,
     DModelElement,
     DPointerTargetable,
-    DRefEdge,
-    DReference,
-    GraphPoint,
-    DState,
-    DUser,
-    LUser,
     Json,
     JsType,
     LClassifier,
-    LGraphElement,
     LModelElement,
     LNamedElement,
     LogicContext,
     MyError,
     RuntimeAccessible,
-    Selectors,
-    TODO,
-    windoww, RuntimeAccessibleClass, PointedBy, DViewElement
+    RuntimeAccessibleClass, store,
+    windoww
 } from "../joiner";
 import Swal from "sweetalert2";
-import {AccessModifier} from "../api/data";
+import Storage from '../data/storage';
+import {compressToUTF16, decompressFromUTF16} from "async-lz-string";
 // import KeyDownEvent = JQuery.KeyDownEvent; // https://github.com/tombigel/detect-zoom broken 2013? but works
 
 console.warn('loading ts U log');
@@ -67,6 +56,20 @@ export class Color {
 }
 @RuntimeAccessible('U')
 export class U {
+
+    static async decompressState(state: string): Promise<string> {
+        return await decompressFromUTF16(state);
+    }
+    static async compressedState(): Promise<string> {
+        return await compressToUTF16(JSON.stringify(store.getState()));
+    }
+    static isOffline(): boolean {
+        return Storage.read('offline') === 'true';
+    }
+    static refresh(): void {
+        window.location.reload();
+    }
+
     // damiano: eseguire una funzione costa in performance, anche se è brutto fare questi cast
     static wrapper<T>(obj: any): T {
         return obj as unknown as T;
@@ -102,19 +105,25 @@ export class U {
 
         // at this point: same type, but different values
         switch (tobj1) {
-            case "number": // if both re nan it fails
-                // NB: infinities are not nan, and they compare with === like normal numbers. weird js...
-                if (isNaN(obj1 as any) && isNaN(obj2 as any)) return true;
-                break;
-            default:
+            default: // primitive with different values
                 console.error("unexpected case in isshallowequal:", {tobj1, obj1, obj2});
-
-                // primitive with different values
                 if (out) {
                     if (undefined === tobj1) out.reason = 'primitive value newly introduced';
                     else if (undefined === tobj2) out.reason = 'primitive value got deleted';
                     else out.reason = 'primitive value changedd';
                 }
+                return false;
+            case 'string': case 'boolean': // primitive with different values
+                if (out) {
+                    if (undefined === tobj1) out.reason = 'primitive value newly introduced';
+                    else if (undefined === tobj2) out.reason = 'primitive value got deleted';
+                    else out.reason = 'primitive value changedd';
+                }
+                return false;
+            case "number": // if both re nan it fails
+                // NB: infinities are not nan, and they compare with === like normal numbers. weird js...
+                if (isNaN(obj1 as any) && isNaN(obj2 as any)) return true;
+                if (out) out.reason = 'number changed';
                 return false;
 
             case "function":
@@ -371,13 +380,13 @@ export class U {
     static objectMergeInPlace<A extends object, B extends object>(output: A, ...objarr: B[]): void {
         const out: GObject = output;
         if (objarr)
-        for (let o of objarr) {
-            if (o && typeof o === "object")
-            for (let key in o) {
-                // noinspection BadExpressionStatementJS,JSUnfilteredForInLoop
-                out[key] ?? (out[key] = o[key]);
+            for (let o of objarr) {
+                if (o && typeof o === "object")
+                    for (let key in o) {
+                        // noinspection BadExpressionStatementJS,JSUnfilteredForInLoop
+                        out[key] ?? (out[key] = o[key]);
+                    }
             }
-        }
     }
 
     public static log(obj: unknown, label: string = '###') {
@@ -971,6 +980,11 @@ export class U {
         // nb: mind that typeof [] === 'object'
         return typeof v === 'object'; }
 
+    static objectFromArray<V extends any>(arr: V[], getKey: (entry:V) => string): Dictionary<string, V>{
+        // @ts-ignore
+        return arr.reduce((acc, val) => { acc[getKey(val)] = val; return acc; }, {});
+    }
+
     static objectFromArrayValues<T extends any>(arr: (string | number)[], val: T = true as T): Dictionary<string | number, T> {
         // @ts-ignore
         return arr.reduce((acc, val) => { acc[val] = val; return acc; }, {});
@@ -1300,6 +1314,43 @@ export class U {
         var rstrip = toremove - lstrip;
         if (asArray) return [str.substring(0, midpoint-lstrip), ellipsisChar, str.substring(midpoint+rstrip)] as RET;
         else return str.substring(0, midpoint-lstrip) + ellipsisChar + str.substring(midpoint+rstrip) as RET;
+    }
+
+    // transform grays: if the color is <20% different from gray, transform it instead in black or white, 0 = don't, 1 = always black or white
+    public static invertHex(s: string, prefix: string='#', transformGrays: number = 0.2): string {
+        if (s.indexOf(prefix) === 0) s = s.substring(prefix.length);
+        let r: number, g: number, b: number, h: number | undefined; // might be NaN if parseInt fails
+        if (s.length === 3 || s.length === 4) {
+            r = parseInt('0x'+s[0]);// works with hex numbers
+            g = parseInt('0x'+s[1]);
+            b = parseInt('0x'+s[2]);
+            h = s.length === 4 ? parseInt('0x'+s[4]) : undefined;
+        } else if (s.length === 6 || s.length === 8){
+            r = parseInt('0x'+s.substring(0, 2));
+            g = parseInt('0x'+s.substring(2, 4));
+            b = parseInt('0x'+s.substring(4, 6));
+            h = s.length === 8 ? parseInt('0x'+s.substring(6, 8)) : undefined;
+        } else return Log.ee("cannot invert hex color " + s + ", invalid length", {s});
+        if (isNaN(r)) return Log.ee("cannot invert hex color " + s +", invalid red", {s});
+        if (isNaN(g)) return Log.ee("cannot invert hex color " + s +", invalid green", {g});
+        if (isNaN(b)) return Log.ee("cannot invert hex color " + s +", invalid blue", {b});
+
+        transformGrays = transformGrays * 128;
+        r = Math.abs(r-128) <= transformGrays ? (r >= 128 ? 0 : 255) : 255 - r;
+        g = Math.abs(g-128) <= transformGrays ? (g >= 128 ? 0 : 255) : 255 - g;
+        b = Math.abs(b-128) <= transformGrays ? (b >= 128 ? 0 : 255) : 255 - b;
+        if (h) h = 255 - h;
+
+        let rs = r.toString(16);
+        if (rs.length === 1) rs = '0'+rs;
+        let gs = g.toString(16);
+        if (gs.length === 1) gs = '0'+gs;
+        let bs = b.toString(16);
+        if (bs.length === 1) bs = '0'+bs;
+        let hs = h ? h.toString(16) : '';
+        if (hs.length === 1) hs = '0'+hs;
+
+        return (prefix) + rs+gs+bs+hs;
     }
 }
 export class DDate{

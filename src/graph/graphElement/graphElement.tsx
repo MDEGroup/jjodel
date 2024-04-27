@@ -162,19 +162,30 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
                 scores = Selectors.getAppliedViewsNew({data:ret.data, node: ret.node,
                     nid: ownProps.nodeid as string, pv: ownProps.parentViewId && DPointerTargetable.from(ownProps.parentViewId)});
             }
-            ret.views = (ownProps.views) ? LPointerTargetable.fromArr(ownProps.views) : scores.stackViews;
+            const tn = transientProperties.node[ownProps.nodeid as string];
+            if (ownProps.views){
+                ret.views = tn.stackViews = LPointerTargetable.fromArr(ownProps.views);
+                // tn.stackViews = [...(ret.views||[]), ...(tn.stackViews || [])];
+            } else {
+                ret.views = scores.stackViews = LPointerTargetable.fromArr( (scores.stackViews||[]).map((v:LViewElement)=>v?.id).filter(vid=>!!vid));
+            }
             ret.viewsid = Pointers.fromArr(ownProps.views) as Pointer<DViewElement>[];
 
             // console.log("debug",  {...this.props, data: this.props.data?.id, view: this.props.view?.id, v0: this.props.views, views: this.props.views?.map( v => v?.id )})
             if (ownProps.view) {
                 ret.view = LPointerTargetable.fromD(Selectors.getViewByIDOrNameD(Pointers.from(ownProps.view), state) as DViewElement);
+                tn.mainView = ret.view;
+                tn.validMainViews = [tn.mainView, ...(tn.validMainViews || [])];
                 Log.w(!ret.view, "Requested view "+ownProps.view+" not found. Another view got assigned.", {requested: ownProps.view, props: ownProps, state: ret});
-            } else ret.view = LPointerTargetable.fromPointer((scores.mainView as any)?.id, state);
+            } else {
+                ret.view = tn.mainView = LPointerTargetable.fromPointer((scores.mainView as any)?.id, state);
+                tn.validMainViews = [tn.mainView, ...(tn.validMainViews || [])];
+            }
 
-            Log.ex(!ret.view, "Could not find any view appliable to element.", {data:ret.data, props: ownProps, state: ret});
+            (ret as any).viewScores = transientProperties.node[ownProps.nodeid as string]; // debug only
+            Log.ex(!ret.view, "Could not find any view appliable to element.", {data:ret.data, props: ownProps, state: ret, scores: (ret as any).viewScores});
             ret.viewid = ret.view.id;
             ret.parentviewid = ownProps.parentViewId;
-            (ret as any).viewScores = transientProperties.node[ownProps.nodeid as string]; // debug only
         }
 
     }
@@ -329,6 +340,8 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
         // if node and data in props must be ignored and not checked for changes. but they are checked if present in usageDeclarations
         let component = nextProps.node.component;
         const nid = nextProps.nodeid;
+        // todo: check oldprops.views-nextprops.views and always set shouldupdate to views newly introduced or removed
+        // U.arrayDiff()
         for (let v of nextProps.views) {
             const vid: Pointer<DViewElement> = v.__raw.id;
             let nodeviewentry = transientProperties.node[nid].viewScores[vid];
@@ -845,12 +858,14 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
         }*/
 
         let jsxOutput: ReactNode = undefined as any;
+        console.log("render", {mainView, otherViews, scores:transientProperties.node[nid].viewScores})
         for (let v of allviews) {
             let viewnodescore = transientProperties.node[nid].viewScores[v.id];
             jsxOutput = viewnodescore.shouldUpdate ? undefined : viewnodescore.jsxOutput;
             let isMain: true | undefined = v === mainView || undefined;
             if (!jsxOutput) viewnodescore.jsxOutput = jsxOutput =
-                this.renderView(this.props, v, nodeType, classes, styleoverride, isMain && decoratorViewsOutput, mainView.id, isMain && otherViews.map(v=>v.id));
+                this.renderView(this.props, v, nodeType, classes, styleoverride,
+                    isMain && decoratorViewsOutput, mainView.id, isMain && otherViews.map(v=>v.id));
             if (!isMain) decoratorViewsOutput.push(jsxOutput);
             if (viewnodescore.shouldUpdate) viewnodescore.shouldUpdate = false; // this needs to be placed post renderView call
         }

@@ -17,6 +17,7 @@ export class DV {
     public static literalView(): string { return beautify(DefaultView.literal()); }
     public static voidView(): string { return beautify(DefaultView.void()); }
     public static operationView(): string { return beautify(DefaultView.operation()); }
+    public static parameterView(): string { return beautify(DefaultView.parameter()); }
 
     // damiano: i want to keep it because it will be useful for a candidate next feature in m1 & layoutable elements
     // it is still work in progress.
@@ -155,7 +156,7 @@ export class DV {
 </section>`
 )}    static semanticErrorOverlay() { return (
 `<section className="overlap">
-    <div className="error-message">{errors.join(',')}</div>
+    <div className="error-message">{errors.join(<br/>)}</div>
 </section>`
 )}
 
@@ -263,7 +264,20 @@ class DefaultView {
 
     public static operation(): string { return (
 `<div className={'root w-100'}>
-    <Select className={'p-1 d-flex'} data={data} field={'type'} label={data.name + ' () => '} />
+    <Select className={'p-1 d-flex'} data={data} field={'type'} label={data.name + ' =>'} />
+    {data.exceptions.length ? " throws " + data.exceptions.join(", ") : ''}
+    <div className={"parameters"}>{
+        data.parameters.map(p => <DefaultNode data={p} key={p.id} />)
+    }</div>
+    {decorators}
+</div>`
+);}
+
+public static parameter(): string { return (
+`<div className={'root w-100 ms-1'}>
+    <Select className={'p-1 d-flex'} data={data} field={'type'}
+        label={data.name + '' + (data.lowerBound === 0 ? '?:' : ':' )}
+        postlabel={data.upperBound === 0 ? '&nbsp;&nbsp;' : '[]'}/>
     {decorators}
 </div>`
 );}
@@ -299,7 +313,8 @@ class DefaultView {
 
     public static object(): string { return (
 `<div className={'root object'}>
-    <Input jsxLabel={<b className={'object-name'}>EObject:</b>} data={data} field={'name'} hidden={true} autosize={true} />
+    <Input jsxLabel={<b className={'object-name'}>{data.instanceof ? data.instanceof.name : "Object"}:</b>}
+            data={data} field={'name'} hidden={true} autosize={true} />
     <hr/>
     <div className={'object-children'}>
         {features.map(f => <DefaultNode key={f.id} data={f} />)}
@@ -312,7 +327,7 @@ class DefaultView {
 `<div className={'root d-flex value'}>
      {instanceofname && <label className={'d-block ms-1'}>{instanceofname}</label>}
      {!instanceofname && <Input asLabel={true} data={data} field={'name'} hidden={true} autosize={true} />}
-    <label className={'d-block m-auto'} style={{color: constants[typeString] || 'gray'}}>
+    <label className={'d-block m-auto'} style={{color: constants[typeString] || 'gray', maxWidth:'100px'}}>
         : {valuesString}
     </label>
     {decorators}
@@ -342,7 +357,7 @@ class DefaultView {
         let nodename: string = (node?.className || '').replace(/[^A-Z]+/g, "").substring(1);
         return `<div className={'w-100 h-100 round bg-white border border-danger'} style={{minHeight:"50px", overflow:"scroll"}}>
             <div className={'text-center text-danger'} tabIndex={-1} style={{background:"#fff", overflow: 'visible', zIndex:100, minWidth:"min-content"}}>
-                <b>{errortype} ERROR on {${dname ? dname : ''} + (false ? ' / ' + ${nodename} : '')})</b>
+                <b>{errortype}_ERROR on {${dname ? dname : ''} + (false ? ' / ' + ${nodename} : '')})</b>
                 <hr/>
                 <label className={'text-center mx-1 d-block'}>
                     While applying view "${v?.name}"

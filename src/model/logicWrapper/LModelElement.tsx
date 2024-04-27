@@ -202,6 +202,23 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
         }
     }
 
+    public static M1Classes = ['DModel', 'DObject', 'DValue']; // Dstrudturalfeature in shapeless obj??
+    public static AbstractClasses = ['DModelElement', 'DNamedElement', '...'];
+    public static M2InstantiableClasses = ['DModel', 'DOperation', 'DClass', 'DReference', 'DAttribute'];
+    isM1!: (()=>boolean);
+    __info_of__isM1: Info = {type:'()=>boolean', txt:<div>Whether the element belong to the metamodel or the model.</div>}
+    get_isM1(c: Context): ()=>boolean {
+        // NB: if called with "abstract classes" like DModelElement, DTypedElement... responds they are in m2
+        return (() => (!(c.data as DModel).isMetamodel && LModelElement.M1Classes.includes(c.data.className)));
+    }
+    isM2!: (()=>boolean);
+    __info_of__isM2: Info = {type:'()=>boolean', txt:<div>Whether the element belong to the metamodel or the model.</div>}
+    get_isM2(c: Context): ()=>boolean { return (() => !(this.get_isM1(c))); }
+
+    isInstantiable!: (()=>boolean);
+    __info_of__isInstantiable: Info = {type:'()=>boolean', txt:<div>Whether the element can produce an instance in the model.</div>}
+    get_isInstantiable(c: Context): ()=>boolean { return (() => (LModelElement.M2InstantiableClasses.includes(c.data.className))); }
+
     childNames!: string[];
     __info_of__childNames: Info = {type: "(json: object, instanceof?: LClass) => LObject", txt: "Array containing the names of all children subelements."};
     get_childNames(c: Context): string[] { return this.get_children(c).map( (c: GObject<LModelElement>) => c.name).filter(c=>!!c) as string[]; }
@@ -3853,7 +3870,7 @@ instanceof === undefined or missing  --> auto-detect and assign the type
     protected get_children_idlist(context: Context): Pointer<DAnnotation | (DPackage|DObject), 1, 'N'> {
         let children: Pointer<(DPackage|DObject), 0, 'N', (LPackage|LObject)>;
         if(context.data.isMetamodel) children = context.data.packages;
-        else children = context.data.objects;
+        else children = context.proxyObject.allSubObjects.map(o => o.id);
         return [...super.get_children_idlist(context) as Pointer<DAnnotation | (DPackage|DObject), 1, 'N'>,
             ...children];
     }
@@ -4012,7 +4029,6 @@ instanceof === undefined or missing  --> auto-detect and assign the type
     protected get_values(context: Context): this['values'] {
         return context.proxyObject.objects.flatMap(o => o.features);
     }
-
 }
 RuntimeAccessibleClass.set_extend(DNamedElement, DModel);
 RuntimeAccessibleClass.set_extend(LNamedElement, LModel);

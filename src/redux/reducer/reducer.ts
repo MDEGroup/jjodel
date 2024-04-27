@@ -41,6 +41,8 @@ import {SimpleTree} from "../../common/SimpleTree";
 import {transientProperties, Selectors} from "../../joiner";
 import {OclEngine} from "@stekoe/ocl.js";
 import { contextFixedKeys } from '../../graph/graphElement/sharedTypes/sharedTypes';
+import Storage from "../../data/storage";
+import {ProjectsApi} from "../../api/persistance";
 
 let windoww = window as any;
 let U: typeof UType = windoww.U;
@@ -425,6 +427,7 @@ export function reducer(oldState: DState = initialState, action: Action): DState
         // for (let gid of ret.graphs) Selectors.updateViewMatchings(gid, ret.modelElements, Object.values(ret.idlookup).map( d => RuntimeAccessibleClass.extends(d, DModelElement.cname)));
         // for (let vid of ret.VIEW_APPLIABLETO_NEEDS_RECALCULATION) { }
         for (let vid of ret.VIEWS_RECOMPILE_ocl) {
+            if (!transientProperties.view[vid]) transientProperties.view[vid] = {} as any;
             transientProperties.view[vid].oclEngine = undefined as any; // force re-parse
             transientProperties.view[vid].oclChanged = true;
             for (let nid in transientProperties.node) {
@@ -454,6 +457,7 @@ export function reducer(oldState: DState = initialState, action: Action): DState
         // transientProperties.view[vid].constantsList = dv.constants?.match(UDRegexp).map(s=>s.substring(4, s.length-1).trim()) || [];
         // let allContextKeys = {...contextFixedKeys};
         if (!dv.constants) {
+            if (!transientProperties.view[vid]) transientProperties.view[vid] = {} as any;
             transientProperties.view[vid].constants = {};
             transientProperties.view[vid].constantsList = [];
             // no need to recompile UD, jsx or measurables, they will have additional parameters in scope but they are undefined and cause no problems.
@@ -473,7 +477,8 @@ export function reducer(oldState: DState = initialState, action: Action): DState
 
         transientProperties.view[vid].constants = constantsOutput;
         transientProperties.view[vid].constantsList = Object.keys(transientProperties.view[vid].constants);
-        // implies recompilation of: ud, jsx and all measurable events
+        // implies recompilation of: jsCondition, ud, jsx and all measurable events
+        ret.VIEWS_RECOMPILE_jsCondition.push(vid);
         ret.VIEWS_RECOMPILE_usageDeclarations.push(vid);
         ret.VIEWS_RECOMPILE_jsxString.push(vid);
         for (let k of DViewElement.MeasurableKeys) (ret as any)['VIEWS_RECOMPILE_'+k].push(vid);
@@ -482,7 +487,8 @@ export function reducer(oldState: DState = initialState, action: Action): DState
 
     for (const vid of ret.VIEWS_RECOMPILE_usageDeclarations) { // compiled in func, but NOT executed, result varies between nodes.
         let dv: DViewElement = DPointerTargetable.fromPointer(vid, ret);
-        const tv = transientProperties.view[vid];
+        let tv = transientProperties.view[vid];
+        if (!tv) transientProperties.view[vid] = tv = {} as any;
         if (!dv.usageDeclarations) {
             tv.UDList = [];
             tv.UDFunction = undefined as any;
@@ -502,7 +508,7 @@ export function reducer(oldState: DState = initialState, action: Action): DState
         // so the following is valid, and a way to overcome the previous limitations:
         // let subobject = {}; subobject[key] += stuff; ret.somefixedname = subobject;
 
-        let allContextKeys = {...contextFixedKeys};
+        let allContextKeys: Dictionary = {...contextFixedKeys};
         for (let k of tv.constantsList) if (!allContextKeys[k]) allContextKeys[k] = true;
         let paramStr = '{'+Object.keys(allContextKeys).join(',')+'}, ret';
         if (vid.includes('Model')) console.log("modelparse, ud", {paramStr, udstr:dv.usageDeclarations, udlist:transientProperties.view[vid].UDList});
@@ -510,7 +516,7 @@ export function reducer(oldState: DState = initialState, action: Action): DState
             tv.UDFunction = new Function(paramStr, 'return ('+dv.usageDeclarations+')(ret)') as (...a:any)=>any;
         } catch (e:any) {
             console.error('error udparse', {vid, e, paramStr, body: 'return ('+dv.usageDeclarations+')(ret)'});
-            tv.UDFunction = new Function("", "(ret)=>{ ret.__invalidUsageDeclarations = "+JSON.stringify(e)+"; ret.__invalidUsageDeclarations.isSyntax = true; }") as (...a:any)=>any;
+            tv.UDFunction = new Function("ret", "ret.__invalidUsageDeclarations = "+JSON.stringify(e)+"; ret.__invalidUsageDeclarations.isSyntax = true; return ret; }") as (...a:any)=>any;
         }
 
 
@@ -523,20 +529,26 @@ export function reducer(oldState: DState = initialState, action: Action): DState
     /* JS CONDITION */
     for (const vid of ret.VIEWS_RECOMPILE_jsCondition) {
         const dv: DViewElement = DPointerTargetable.fromPointer(vid, ret);
-        const tv = transientProperties.view[vid];
+        let tv = transientProperties.view[vid];
+        if (!tv) transientProperties.view[vid] = tv = {} as any;
         tv.jsConditionChanged = true;
         if (!dv.jsCondition) {
             tv.jsCondition = undefined;
             continue;
         }
+        const lines = dv.jsCondition.trim().split('\n');
+        let lastLine = lines[lines.length - 1];
+        if (lastLine.indexOf('return') !== 0) lines[lines.length - 1] = `return (${lastLine})`;
+
+
+        if (!dv.jsxString) { transientProperties.view[vid].JSXFunction = undefined as any; continue; }
+        let allContextKeys = {...contextFixedKeys};
+        for (let k of transientProperties.view[vid].constantsList) if (!allContextKeys[k]) allContextKeys[k] = true;
+
+        let paramStr = '{'+Object.keys(allContextKeys).join(',')+'}';
+        const body = lines.join('\n');
         try {
-            const lines = dv.jsCondition.trim().split('\n');
-            let lastLine = lines[lines.length - 1];
-            if (lastLine.indexOf('return') !== 0) lines[lines.length - 1] = `return (${lastLine})`;
-            const fx = `() => {${lines.join('\n')}}`;
-            console.log('FX', fx);
-            tv.jsCondition = eval(fx);
-            console.log('JS Condition parsed', tv)
+            tv.jsCondition = new Function(paramStr, body) as ((...a:any)=>any);
         } catch (e) {
             tv.jsCondition = undefined;
             console.log('JS Condition parsed error', e);
@@ -546,6 +558,8 @@ export function reducer(oldState: DState = initialState, action: Action): DState
 
     for (const vid of ret.VIEWS_RECOMPILE_jsxString) { // compiled in func, but NOT executed, result varies between nodes.
         let dv: DViewElement = DPointerTargetable.fromPointer(vid, ret);
+        let tv = transientProperties.view[vid];
+        if (!tv) transientProperties.view[vid] = tv = {} as any;
         if (!dv.jsxString) { transientProperties.view[vid].JSXFunction = undefined as any; continue; }
         let allContextKeys = {...contextFixedKeys};
         for (let k of transientProperties.view[vid].constantsList) if (!allContextKeys[k]) allContextKeys[k] = true;
@@ -573,6 +587,8 @@ export function reducer(oldState: DState = initialState, action: Action): DState
         let vid: Pointer<DViewElement>;
         for (vid of (ret as any)['VIEWS_RECOMPILE_'+key]) {
             let dv: DViewElement = DPointerTargetable.fromPointer(vid, ret);
+            let tv = transientProperties.view[vid];
+            if (!tv) transientProperties.view[vid] = tv = {} as any;
             let str: string = (dv as any)[key];
             if (!str) {
                 (transientProperties.view[vid] as any)[key] = undefined;
@@ -762,7 +778,7 @@ function buildLSingletons(alld: Dictionary<string, typeof DPointerTargetable>, a
     }
 }
 
-export function stateInitializer() {
+export async function stateInitializer() {
     statehistory[DUser.current] = {redoable: [], undoable: []};
     RuntimeAccessibleClass.fixStatics();
     let dClassesMap: Dictionary<string, typeof DPointerTargetable> = {};
@@ -795,4 +811,9 @@ export function stateInitializer() {
         1
     );
     DState.init();
+    const user = Storage.read<DUser>('user');
+    if(!user) return;
+    DUser.new(user.username, user.id);
+    DUser.current = user.id;
+    await ProjectsApi.getAll();
 }

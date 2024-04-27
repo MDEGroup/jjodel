@@ -7,11 +7,21 @@ import {AllPropss} from "./src/graph/vertex/Vertex";
 export const aaa = 0;
 let data:any, node:any, view:any, component:any;
 let otherViews: any, m1Objects:any, firstPackage:any, DefaultNode: any, otherPackages:any, refEdges:any, extendEdges:any, React:any, Edge:any;
-/* anchor roadmap
+/*
+
+
+<div onDragEnd={"dragAnchor("+i+")"}></div>
+<div onDragEnd={e()=> node.anchor[1].x = e.x;}></div>
+<div onDragEnd={e()=> node.anchor[2].x = e.x;}></div>
+
+ anchor roadmap
 1) multi ondrag... events with names
-2) jqui handling subelements with "draggable res8izable rotatable" classes
-3) edges able to target node with named anchors  how? end={nodeend} anchorEnd={anchorname} ? or end={node.id+'#'+anchorname}? the second one makes harder to allow end={dmodelelement}
-4) ? how to make suggestedEdges remember anchors?store it in dedges? what is edges id? can they "swap" through positional id=keys? nope, eid is nodestartid~nodeendid
+2) jqui handling subelements with "draggable resizable rotatable" classes (or attributes or ondrag-* events)
+3) per dopo: edges able to target node with named anchors  how? end={nodeend} anchorEnd={anchorname} ? or end={node.id+'#'+anchorname}? the second one makes harder to allow end={dmodelelement}
+
+
+
+
 
 */
 // todo: check oldprops.views-nextprops.views and always set shouldupdate to views newly introduced or remo**ved

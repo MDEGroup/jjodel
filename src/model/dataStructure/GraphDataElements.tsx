@@ -1229,7 +1229,7 @@ export class DVoidEdge extends DGraphElement {
 
     public static new(htmlindex: number, model: DGraph["model"]|null|undefined, parentNodeID: DGraphElement["father"], graphID: DGraphElement["graph"],
                       nodeID: DGraphElement["id"]|undefined, start: DGraphElement["id"], end: DGraphElement["id"],
-                      longestLabel: DEdge["longestLabel"], labels: DEdge["labels"]): DEdge {
+                      longestLabel?: DEdge["longestLabel"], labels?: DEdge["labels"]): DEdge {
         return new Constructors(new DEdge('dwc'), parentNodeID, true, undefined, nodeID)
             .DPointerTargetable()
             .DGraphElement(model, graphID, htmlindex)

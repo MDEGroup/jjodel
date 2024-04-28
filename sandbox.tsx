@@ -10,9 +10,17 @@ let otherViews: any, m1Objects:any, firstPackage:any, DefaultNode: any, otherPac
 
 // todo: check oldprops.views-nextprops.views and always set shouldupdate to views newly introduced or remo**ved
 /**
+ /* anchor roadmap
+ 1) multi ondrag... events with names
+ 2) jqui handling subelements with "draggable res8izable rotatable" classes
+ 3) edges able to target node with named anchors  how? end={nodeend} anchorEnd={anchorname} ? or end={node.id+'#'+anchorname}? the second one makes harder to allow end={dmodelelement}
+ 4) ? how to make suggestedEdges remember anchors?store it in dedges? what is edges id? can they "swap" through positional id=keys? nope, eid is nodestartid~nodeendid
+ */
+// todo: check oldprops.views-nextprops.views and always set shouldupdate to views newly introduced or remo**ved
+/**
+ copy a class view, give it higher prio. it will not be applied.
+ on view duplicate, css is not recompiled
 
-copy a class view, give it higher prio. it will not be applied.
-on view duplicate, css is not recompiled
 
 
 

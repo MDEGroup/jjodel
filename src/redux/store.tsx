@@ -404,13 +404,35 @@ function makeDefaultGraphViews(vp: Pointer<DViewPoint>, validationVP: Pointer<DV
 }`
     }, false, validationVP, 'Pointer_ViewOverlay' );
 
+    let anchorView: DViewElement = DViewElement.new2('Naming error view', DV.anchorJSX(), (v) => {
+        v.isExclusiveView = false;
+        v.palette={'anchor-':['#77f', '#007'], 'anchor-hover-':['#7f7', '#070']}
+        v.usageDeclarations = "(ret)=>{ // scope: data, node, view, state, \n" +
+            "// ** preparations and default behaviour here ** //\n" +
+            "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
+            "// ** declarations here ** //\n" +
+            "ret.anchors = data && node.anchors;\n"+
+            "}";
+        v.css = `
+.anchor{
+    position: absolute;
+    background-color: var(--anchor-1);
+    outline: 2px solid var(--anchor-2);
+    &:hover{
+        background-color: var(--anchor-hover-1);
+        outline: 2px solid var(--anchor-hover-2);
+    }
+}
+`
+    }, false, vp, 'Pointer_ViewCheckName' );
+
     let errorCheckName: DViewElement = DViewElement.new2('Naming error view', DV.invisibleJsx(), (v) => {
         v.isExclusiveView = false;
         v.usageDeclarations = "(ret)=>{ // scope: data, node, view, state, \n" +
             "// ** preparations and default behaviour here ** //\n" +
             "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
             "// ** declarations here ** //\n" +
-            "ret.name = data && data.name || '';"+
+            "ret.name = data && data.name || '';\n"+
             "ret.type = data && data.className.substring(1) || 'shapeless';\n"+
             "}";
         v.onDataUpdate = `
@@ -534,7 +556,7 @@ node.state = {error_lowerbound: err};\n
 
     let dv_subviews = [DefaultViews.model(vp), DefaultViews.package(vp), DefaultViews.class(vp), DefaultViews.enum(vp),
         DefaultViews.attribute(vp), DefaultViews.reference(vp), DefaultViews.operation(vp), DefaultViews.parameter(vp),
-        DefaultViews.literal(vp), DefaultViews.object(vp), DefaultViews.value(vp), voidView, ...edgeViews, edgePointView];
+        DefaultViews.literal(vp), DefaultViews.object(vp), DefaultViews.value(vp), voidView, ...edgeViews, edgePointView, anchorView];
 
     let validation_subviews = [errorOverlayView, errorCheckLowerbound, errorCheckName];
     // SetFieldAction.new(vp, 'subViews', U.objectFromArrayValues(dv_subviews.map(dv=>dv.id), 1.5));

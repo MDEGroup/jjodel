@@ -20,6 +20,7 @@ import {ProjectsApi} from "../api/persistance";
 import Navbar from "../components/navbar/Navbar";
 import {SaveManager} from "../components/topbar/SaveManager";
 import Loader from "../components/loader/Loader";
+import WebSocketsAttacher from "../components/webSockets/WebSocketsAttacher";
 
 
 function EditorComponent(props: AllProps) {
@@ -44,6 +45,7 @@ function EditorComponent(props: AllProps) {
     const viewsDeDuplicator: Dictionary<Pointer<DViewElement>, LViewElement> = {};
     for (let v of allViews) viewsDeDuplicator[v.id] = v;
     if(user.project) return(<>
+        <WebSocketsAttacher projectID={project.id} />
         <Navbar />
         <Dock />
         <style id={"views-css-injector"}>

@@ -1,7 +1,3 @@
-import {BrowserRouter, Route, Routes} from 'react-router-dom';
-import App from '../App';
-import CollaborativeAttacher from "../components/collaborative/CollaborativeAttacher";
-
 function Router() {
 
     return(<div>Nope</div>);

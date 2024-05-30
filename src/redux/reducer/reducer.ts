@@ -36,7 +36,7 @@ import {
 } from "../../joiner";
 import React from "react";
 import {LoadAction, RedoAction, UndoAction} from "../action/action";
-import Collaborative from "../../components/collaborative/Collaborative";
+import WebSockets from "../../components/webSockets/WebSockets";
 import {SimpleTree} from "../../common/SimpleTree";
 import {transientProperties, Selectors} from "../../joiner";
 import {OclEngine} from "@stekoe/ocl.js";
@@ -417,7 +417,7 @@ export function reducer(oldState: DState = initialState, action: Action): DState
         action = (compositeAction) ? compositeAction : action;
         if(action.sender === DUser.current && !ignoredFields.includes(action.field as keyof DState)) {
             const parsedAction: JSON & GObject = JSON.parse(JSON.stringify(action));
-            Collaborative.client.emit('pushAction', parsedAction);
+            WebSockets.collaborative.emit('pushAction', parsedAction);
         }
     }
 

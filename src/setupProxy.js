@@ -23,4 +23,12 @@ module.exports = function (app) {
             changeOrigin: true
         })
     );
+    app.use(
+        '/iot',
+        createProxyMiddleware({
+            target: process.env['REACT_APP_IOT'],
+            ws: true,
+            changeOrigin: true
+        })
+    );
 };

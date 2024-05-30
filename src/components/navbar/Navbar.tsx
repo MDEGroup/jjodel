@@ -1,5 +1,5 @@
 import './style.scss';
-import React, {Dispatch, ReactElement, useEffect, useState} from 'react';
+import React, {Dispatch, ReactElement, useState} from 'react';
 import {connect} from 'react-redux';
 import {DState, DUser, LUser, SetRootFieldAction, U} from '../../joiner';
 import File from './tabs/File';
@@ -7,13 +7,9 @@ import Edit from './tabs/Edit';
 import Debug from './tabs/Debug';
 import DebugImage from '../../static/img/debug.png';
 import {FakeStateProps} from '../../joiner/types';
-import Collaborative from "../collaborative/Collaborative";
-import {SaveManager} from "../topbar/SaveManager";
-import Examples from "./tabs/Examples";
-import Storage from "../../data/storage";
 import {useLocation, useNavigate} from "react-router-dom";
 import {AuthApi, ProjectsApi} from "../../api/persistance";
-import * as path from "path";
+import WebSockets from "../webSockets/WebSockets";
 
 let clickTimestamps: number[] = [];
 const clicksRequired = 2;
@@ -27,6 +23,7 @@ function NavbarComponent(props: AllProps) {
     const [renders, setRenders] = useState(0);
 
     const closeProject = async() => {
+        WebSockets.iot.disconnect();
         navigate('/dashboard');
         U.refresh();
         /*

@@ -1,5 +1,5 @@
 
-import {Action, DProject, Pointer} from '../../joiner';
+import {Action, DProject, Pointer, SetRootFieldAction, store} from '../../joiner';
 import type {CompositeAction, GObject, LProject} from '../../joiner';
 import {useEffectOnce} from 'usehooks-ts';
 import WebSockets from './WebSockets';
@@ -14,11 +14,13 @@ function WebSocketsAttacher(props: Props) {
         WebSockets.iot.connect();
     });
 
-    WebSockets.iot.on('pullAction', (action: GObject<Action & CompositeAction>) => {
-        const receivedAction = Action.fromJson(action);
+    WebSockets.iot.on('pullAction', (receivedAction: GObject<Action & CompositeAction>) => {
+        const action = Action.fromJson(receivedAction);
+        if(!(action.field in store.getState()['topics']))
+            SetRootFieldAction.new(action.field.replaceAll('+=', ''), [], '', false);
+        action.hasFired = 0;
         console.log('Received Action from server.', action);
-        receivedAction.hasFired = 0;
-        receivedAction.fire();
+        action.fire();
     });
 
     return(<></>);

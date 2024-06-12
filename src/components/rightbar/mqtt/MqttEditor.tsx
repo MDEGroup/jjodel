@@ -1,7 +1,8 @@
-import {DState} from '../../../joiner';
+import {Action, CompositeAction, DState, DUser, GObject, LUser, SetRootFieldAction, store, U} from '../../../joiner';
 import {FakeStateProps} from '../../../joiner/types';
 import {Dispatch, ReactElement, ReactNode, useState} from 'react';
 import {connect} from 'react-redux';
+import WebSockets from "../../webSockets/WebSockets";
 
 function makeInput(label: string, type: 'text'|'number'|'password'): ReactNode {
     return(<div className={'p-1 d-flex'}>
@@ -11,31 +12,59 @@ function makeInput(label: string, type: 'text'|'number'|'password'): ReactNode {
 }
 
 function MqttEditorComponent(props: AllProps) {
-    const [connected, setConnected] = useState(false);
-    const bg = connected ? 'bg-success' : 'bg-danger';
+    const {user} = props;
+    const [connected, setConnected] = useState(WebSockets.iot.connected);
+
+
+    const connect = async() => {
+        SetRootFieldAction.new('isLoading', true);
+        WebSockets.iot.io.opts.query = {'project': user.project?.id};
+        WebSockets.iot.off('pull-action');
+        WebSockets.iot.on('pull-action', (receivedAction: GObject<Action & CompositeAction>) => {
+            const action = Action.fromJson(receivedAction);
+            if(!(action.field in store.getState()['topics']))
+                SetRootFieldAction.new(action.field.replaceAll('+=', ''), [], '', false);
+            action.hasFired = 0;
+            console.log('Received Action from server.', action);
+            action.fire();
+        });
+        WebSockets.iot.connect();
+        await U.sleep(1);
+        SetRootFieldAction.new('isLoading', false);
+        setConnected(WebSockets.iot.connected);
+    }
+    const disconnect = async() => {
+        SetRootFieldAction.new('isLoading', true);
+        WebSockets.iot.off('pull-action');
+        WebSockets.iot.disconnect();
+        await U.sleep(1);
+        SetRootFieldAction.new('isLoading', false);
+        setConnected(WebSockets.iot.connected);
+    }
 
     return <section className={'p-2'}>
         <div className={'d-flex'}>
             <h4 className={'d-block my-auto'}>MQTT</h4>
-            <div style={{width: '15px', height: '15px'}} className={`d-block ms-2 my-auto circle ${bg}`}></div>
+            <div style={{width: '15px', height: '15px'}} className={`d-block ms-2 my-auto circle ${connected ? 'bg-success' : 'bg-danger'}`}></div>
         </div>
         {makeInput('Host', 'text')}
         {makeInput('Port', 'number')}
         <hr className={'my-2'} />
         {makeInput('Username', 'text')}
         {makeInput('Password', 'password')}
-        {!connected && <button onClick={e => setConnected(true)} className={'mt-3 btn btn-success w-100 p-2'}>Connect</button>}
-        {connected && <button onClick={e => setConnected(false)} className={'mt-3 btn btn-danger w-100 p-2'}>Disconnect</button>}
+        {!connected && <button onClick={connect} className={'mt-3 btn btn-primary w-100 p-2'}>Connect</button>}
+        {connected && <button onClick={disconnect} className={'mt-3 btn btn-primary w-100 p-2'}>Disconnect</button>}
     </section>;
 }
 interface OwnProps {}
-interface StateProps {}
+interface StateProps {user: LUser}
 interface DispatchProps {}
 type AllProps = OwnProps & StateProps & DispatchProps;
 
 
 function mapStateToProps(state: DState, ownProps: OwnProps): StateProps {
     const ret: StateProps = {} as FakeStateProps;
+    ret.user = LUser.fromPointer(DUser.current);
     return ret;
 }
 

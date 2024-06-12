@@ -45,7 +45,7 @@ function EditorComponent(props: AllProps) {
     const viewsDeDuplicator: Dictionary<Pointer<DViewElement>, LViewElement> = {};
     for (let v of allViews) viewsDeDuplicator[v.id] = v;
     if(user.project) return(<>
-        <WebSocketsAttacher projectID={project.id} />
+        {/*<WebSocketsAttacher projectID={project.id} />*/}
         <Navbar />
         <Dock />
         <style id={"views-css-injector"}>

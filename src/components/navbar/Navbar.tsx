@@ -23,7 +23,7 @@ function NavbarComponent(props: AllProps) {
     const [renders, setRenders] = useState(0);
 
     const closeProject = async() => {
-        WebSockets.iot.disconnect();
+        if(WebSockets.iot.connected) WebSockets.iot.disconnect();
         navigate('/dashboard');
         U.refresh();
         /*

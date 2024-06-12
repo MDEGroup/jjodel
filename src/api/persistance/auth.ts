@@ -18,7 +18,7 @@ class AuthApi {
     }
     static offline(): void {
         Storage.reset(); Storage.write('offline', 'true');
-        const user = DUser.new('Unknown', 'Pointer_User_Default');
+        const user = DUser.new('Unknown', 'Pointer_UserDefault');
         Storage.write('user', user);
     }
 }

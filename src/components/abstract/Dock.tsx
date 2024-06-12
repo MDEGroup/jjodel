@@ -43,6 +43,7 @@ function DockComponent(props: AllProps) {
     const layout: LayoutData = {dockbox: {mode: 'horizontal', children: []}};
     layout.dockbox.children.push({tabs: [ModelsSummary]});
     layout.dockbox.children.push({tabs: [
+        mqtt,
         structure,
         metadata,
         tree,

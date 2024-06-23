@@ -4046,6 +4046,7 @@ b {
   background-color: white;
   width: 12%;
   height: 100%;
+  top: 67px;
 }
 .leftbar > div {
   cursor: pointer;

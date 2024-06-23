@@ -4356,6 +4356,7 @@ i.bi:hover {
 
 .leftbar {
   position: absolute;
+  top: 67px;
   background-color: white;
   width: 12%;
   height: 100%;

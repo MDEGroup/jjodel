@@ -83,7 +83,7 @@ const [animal, setAnimal] = useState(false);
 
 
     return (<>
-        {false && 
+        {animal && 
             <>
             <div className='swen-container'></div>
             
@@ -96,10 +96,12 @@ const [animal, setAnimal] = useState(false);
 
             </>
         } 
-        <div className={'jjodel'} onClick={(e) => setAnimal(!animal)}>
-            <span>jjodel v1.1</span> <i className="bi bi-globe-americas"></i> manatee
+
+        <div className={'jjodel'} onClick={(e) => {setAnimal(!animal)}}>
+            jjodel v1.1 <i className="bi bi-globe-americas"></i> manatee
         </div>
-        </>);
+
+    </>);
 }
 
 function BottomBarComponent(props: AllProps): JSX.Element {

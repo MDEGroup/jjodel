@@ -280,16 +280,26 @@ used by Navbar_NEW_OLD.tsx (purple version)
 .swen.animal {
     background-color: white;
     padding: 20px;
-    border-radius: 2px!important;
+    border-radius: 4px!important;
     color: var(--color);
+
+    width: 600px;
+    box-shadow: none;
+    background-image: url('../../static/img/manatee.png');
+    background-repeat: no-repeat;
+    background-position: calc(100% - 20px);
+    padding-right: 150px;
+    
 
     & h1 {
         font-size: 1.4em;
     }
     & p {
         font-size: 1em;
+
     }
 }
+
 
 .swen-container {
     top: 0; 

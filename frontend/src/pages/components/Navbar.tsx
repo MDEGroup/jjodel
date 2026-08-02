@@ -615,7 +615,7 @@ function NavbarComponent(props: AllProps) {
                         // Try to find the metamodel from last selected element, fallback to first metamodel
                         let activeMetamodel = metamodels.find(m => m);
                         // Get lastSelectedModelElement directly from store to avoid re-renders
-                        const currentState = store.getState();
+                        const currentState = DState.getState();
                         let lastSelectedModelElement: string | undefined;
                         if (currentState._lastSelected?.modelElement) {
                             try {

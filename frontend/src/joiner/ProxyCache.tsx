@@ -87,11 +87,13 @@ The system uses 2 different caches with shared entries.
 
 */
 type ProxyKey = string;
+const debug: boolean = false;
+
 @RuntimeAccessible("ProxyCache")
 export class ProxyCache {
     static clonedCounter: Dictionary<Pointer, number> = {};
     static cache: Dictionary<Pointer, Dictionary<number/*clonedCount*/, Dictionary<ProxyKey, CacheEntry>>> = {};
-    static globalCache: Dictionary<number/* DState.current.clonedCounter */, Dictionary<Pointer, Dictionary<ProxyKey, CacheEntry>>> = {};
+    static globalCache: Dictionary<number/* DState.getState().clonedCounter */, Dictionary<Pointer, Dictionary<ProxyKey, CacheEntry>>> = {};
     static oldStateCC: number = -1;
     static subelementMap: Dictionary<Pointer, Pointer[]> = {};
     static eidMap: Dictionary<Pointer, string> = {};
@@ -100,6 +102,7 @@ export class ProxyCache {
 
     static disable(): boolean {
         let old = ProxyCache.enabled;
+        // todo: probolem: klivechanges kills proxcache
         ProxyCache.enabled = false;
         return old;
     }
@@ -109,13 +112,25 @@ export class ProxyCache {
         return old;
     }
 
+    /* what it does:
+    populate subelementMap
+    populate eidMap:
+        - objects: call obj.eid
+        - everything else: calls obj.name
+
+   computational complexity: O(N * k) k = max(name, obj.eid) which should both be o(1)
+
+
+    */
     static update(ret: DeepReadonly<DState>, old: DeepReadonly<DState>): void {
+        if (!U.safeMode) return ProxyCache.update0(ret, old);
         try { ProxyCache.update0(ret, old); }
         catch (e: any) {
            Log.eDevv("error in cache update", {e, stack: [...(e.stack.split("\n"))] });
         }
     }
     static update0(ret: DeepReadonly<DState>, old: DeepReadonly<DState>): void {
+        console.log("cache update", U.jsonCopy({ret, old}));
         let allObjectKeys = new Set(U.arrayMergeInPlace(Object.keys(ret.idlookup), Object.keys(old.idlookup)));
         if (!ProxyCache.enabled) { return; }
         ProxyCache.subelementMap = {};
@@ -188,14 +203,14 @@ export class ProxyCache {
     }
     // when the whole state didn't change since last call, i cache even stuff without dependencies, assuming they are deterministic or don't track stuff outside the state.
     private static globalMakeEntry(k: string, d: D, i?: Info): CacheEntry {
-        let cc = DState.current?.clonedCounter || -1;
+        let cc = DState.getState()?.clonedCounter || -1;
         if (!ProxyCache.globalCache[cc]) ProxyCache.globalCache[cc] = {};
         if (!ProxyCache.globalCache[cc][d.id]) ProxyCache.globalCache[cc][d.id] = {};
         if (!ProxyCache.globalCache[cc][d.id][k]) ProxyCache.globalCache[cc][d.id][k] = {success: false, dependencies: []};
         return ProxyCache.globalCache[cc][d.id][k];
     }
     private static globalGet(k: string, d: D, i?: Info): CacheEntry | null {
-        let cc = DState.current?.clonedCounter || -1;
+        let cc = DState.getState()?.clonedCounter || -1;
 
         // new approach: global cache is only populated by local cache entries moved after computed dependencies.
         // if state is unchanged: either use global cache or recompute non-cached value with deps
@@ -220,7 +235,7 @@ export class ProxyCache {
 
     private static globalReset(){
         ProxyCache.globalCache = {};
-        ProxyCache.oldStateCC = DState.current?.clonedCounter || -1;
+        ProxyCache.oldStateCC = DState.getState()?.clonedCounter || -1;
     }
 
     private static get0(k: string, d: D, i?: Info): CacheEntry | null {
@@ -236,7 +251,7 @@ export class ProxyCache {
         }
 
         let cc = d.clonedCounter || -1;
-        let newStateCC: number = DState.current.clonedCounter as any;
+        let newStateCC: number = DState.getState().clonedCounter as any;
         let didStateChange = ProxyCache.oldStateCC !== newStateCC;
         if (didStateChange) ProxyCache.globalReset();
         else {
@@ -257,6 +272,7 @@ export class ProxyCache {
         // false should be found only in case of loops like proxy.get("k") -> cache.get("k") -> proxy.get("k")
 
         let version: number;
+        const info = i;
         outer: for (let i = 0; i < dependencies.length; i++) {
             let dep = dependencies[i];
             switch (dep) {
@@ -269,27 +285,27 @@ export class ProxyCache {
                     // ProxyCache.clear(c, k);
                     ret.success = false;
                     ret.dependencies[i] = version;
-                    console.log("proxyCache fail 'this'", {rd:ret.dependencies, i, dep, ret});
+                    if (debug) console.log("proxyCache fail 'this'", U.jsonCopy({rd:ret.dependencies, id: info?.dependencies, i, info, dep, ret}));
                     break outer;
                 default:
                     let versions = ProxyCache.navigate(dep, d);
                     if (!versions) {
                         ret.success = false;
                         ret.dependencies = [];
-                        Log.eDevv("Cache have wrong dependencies path", {dep, i, d});
+                        Log.eDevv("Cache have wrong dependencies path", U.jsonCopy({dep, i, info, d}));
                         break outer;
                     }
                     if (versions.length !== ret.dependencies.length) {
                         ret.success = false;
+                        if (debug) console.log("proxyCache fail length", U.jsonCopy({vl: versions.length, rdl:ret.dependencies.length, versions, rd:ret.dependencies, id: info?.dependencies, i, info, dep, ret}));
                         ret.dependencies = versions;
-                        console.log("proxyCache fail length", {versions, rd:ret.dependencies, i, dep, ret});
                         break outer;
                     }
                     for (let j = 0; j < versions.length; j++) {
                         if (versions[j] !== ret.dependencies?.[j]) {
                             ret.success = false;
                             ret.dependencies = versions;
-                            console.log("proxyCache fail version", {versions, rd:ret.dependencies, i, dep, ret, j});
+                            if (debug) console.log("proxyCache fail version", U.jsonCopy({versions, rd:ret.dependencies, id: info?.dependencies, i, info, dep, ret, j}));
                             break outer;
                         }
                     }
@@ -299,7 +315,8 @@ export class ProxyCache {
         newStateCC ??= -1;
         if (!ProxyCache.globalCache[newStateCC]) ProxyCache.globalCache[newStateCC] = {};
         if (!ProxyCache.globalCache[newStateCC][d.id]) ProxyCache.globalCache[newStateCC][d.id] = {};
-        if (!ProxyCache.globalCache[newStateCC][d.id][k]) ProxyCache.globalCache[newStateCC][d.id][k] = ret
+        if (!ProxyCache.globalCache[newStateCC][d.id][k]) ProxyCache.globalCache[newStateCC][d.id][k] = ret;
+
         return ret;
     }
 
@@ -325,6 +342,10 @@ export class ProxyCache {
         let targets: GObject<D>[] = [d0];
         for (let i = 0; i < path.length; i++) {
             let s = path[i];
+            switch (s) {
+                case "this": case "": continue; // next loop - just ignore "this" keyword in paths arrays
+                default: break; // continue this loop
+            }
             if (!s) return targets || null;
             if (s[0] === "$") {
                 if (ProxyCache.status === "preparing") {

@@ -100,8 +100,18 @@ class TransactionStatus{
 let t = new TransactionStatus();
 windoww.transactionStatus = t;
 
+let statePreTransaction: DState | null = null; // used for livepatches only
+
+(window as any).statemap = new WeakMap();
 export function BEGIN() {
-    if (t.transactionDepthLevel === 0) t.hasAborted = false;
+    if (t.transactionDepthLevel === 0) {
+        t.hasAborted = false;
+        if (U.liveStateChanges) {
+            statePreTransaction = transientProperties.livePatches;
+            // console.log("save state", {statePreTransaction});
+            if (statePreTransaction) ((window as any).statemap as WeakMap<DState, number>).set(statePreTransaction, 0);
+        }
+    }
     t.hasBegun = true; // redundant but actions are reading this, minimize changes
     t.transactionDepthLevel++;
     // if (inCommit) console.warn('begin', {transactionDepthLevel: t.transactionDepthLevel});
@@ -115,15 +125,21 @@ export function ABORT(): boolean {
     //END(); // abort cannot call end, otherwise if i do a TRANSACTION (() => if(x) ABORT()) it risks calling END() twice.
     return ret;
 }
+
+
+
 let inCommit = false;
 // if without parameter: commits the current pending stuff, with parameter: fires the action ignoring transaction block while keeping te transaction active
-export function COMMIT(action?:Action, deep: boolean = true): boolean {
+export function COMMIT(action?:Action | (()=>any), deep: boolean = true, restart: boolean = true): boolean {
     let olddepth = t.transactionDepthLevel;
+
+    // if wasn't in an active TRANSACTION, just call the callback
     if (deep && olddepth<=0) { // not deep, but must not be triggered during setInterval buffer aggregator
         END(); //just safety to restore has begun state.
-        action?.fire();
+        if (action && typeof action ==="function") action(); else action?.fire();
         return false;
     }
+
     inCommit = true;
     // if (action) console.log('commit 0', action, t.pendingActions,{lv:+t.transactionDepthLevel, begun: t.hasBegun, deep});
 
@@ -132,14 +148,28 @@ export function COMMIT(action?:Action, deep: boolean = true): boolean {
         END(); // triggers FINAL_END, while loop required because AtTransaction callback might have started a new transaction.
     } else END();
     // if (action) console.log('commit 1', action, t.pendingActions,{lv:+t.transactionDepthLevel, begun: t.hasBegun, deep});
-    action?.fire();
+    if (action && typeof action ==="function") action(); else action?.fire();
     if (deep) t.transactionDepthLevel = olddepth-1;
-    BEGIN();
+    if (restart) BEGIN();
     inCommit = false;
     return true;
 }
 
-export function END(): boolean {
+let pendingPromisex: Promise<boolean>[] = [];
+let pendingResolvers: Array<(value: boolean) => void> = [];
+
+function makePromise(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+        pendingResolvers.push(resolve);
+    });
+}
+function fulfillPromise(b: boolean): void {
+    const resolvers = pendingResolvers;
+    pendingResolvers = []; // clear before resolving, in case resolving triggers new makePromise calls
+    resolvers.forEach((resolve) => resolve(b));
+}
+
+export function END(): Promise<boolean> {
     t.transactionDepthLevel--;
     // if (inCommit) console.log('commit end', {lv: +t.transactionDepthLevel});
     if (!inCommit) windoww.updateDebuggerComponent();
@@ -148,20 +178,25 @@ export function END(): boolean {
 
     if (t.transactionDepthLevel < 0) { console.debug("mismatching END() - transaction already closed"); t.transactionDepthLevel = 0; }
     if (t.transactionDepthLevel === 0) return FINAL_END();
-    return false;
+    return makePromise();
 }
 
-function FINAL_END(path?: string, oldval?: any, newval?: any, desc?:string): boolean{
+function FINAL_END(path?: string, oldval?: any, newval?: any, desc?:string): Promise<boolean> {
     t.hasBegun = false;
+    const promise = makePromise();
     // pendingActions.sort( (a, b) => a.timestamp - b.timestamp)
+    // if (U.liveStateChanges) console.log("final_end save state", {a:t.hasAborted, po:t.pendingActions, statePreTransaction});
     if (t.hasAborted) {
         t.pendingActions = [];
         t.hasAborted = false;
-        transientProperties.livePatches = store.getState();
-        return false;
+        DState.current = store.getState();
+        transientProperties.livePatches = statePreTransaction;
+        fulfillPromise(false);
+        return promise; // can be awaited even if it's already fulfilled, functionally like setTimeout(then, 0), "then" triggers at next action batch.
     }
     let ret: boolean = false;
     if (t.pendingActions.length) {
+        if (U.liveStateChanges) t.pendingActions = []; // fire the composite action to trigger mapstatetoprops, but empty because changes are already carried on.
         const ca: CompositeAction = new CompositeAction(t.pendingActions, false);
         if (lastDescription) {
             path = lastDescription.name;
@@ -172,14 +207,15 @@ function FINAL_END(path?: string, oldval?: any, newval?: any, desc?:string): boo
         }
         if (path) ca.descriptor = new ActionDescriptor(path, oldval, newval, desc);
         t.pendingActions = [];
-        ret = ca.fire();
+        ret = ca.fire(U.liveStateChanges);
         let callback: (...argss:any)=>void = null as any;
         if (ret) try {
             for (callback of at_transaction) callback?.();
             at_transaction = [];
         } catch (e) { Log.eDevv('error in AT_TRANSACTION callback', {e, callback}); }
     }
-    return ret;
+    fulfillPromise(ret);
+    return promise;
 }
 
 export class ActionDescriptor{
@@ -216,6 +252,12 @@ export async function TRANSACTION_MERGE(name:string, func: ()=> void, oldval?: a
 export async function TRANSACTION(name:string, func: ()=> void, oldval?: any, newval?: any, desc?:string, mergeWithPrevious = false): Promise<boolean> {
 //export function TRANSACTION<F extends NoAsyncFn)>(func: F, ...params: Parameters<F>): boolean | DState {
     BEGIN();
+    // TRANSACTION could be used in user code for atomic events.
+    // in that case i don't require a name as first parameter. i want to be more fault tolerant and make calls less verbose.
+    if (typeof name === "function") {
+        func = name as any;
+        name = "";
+    }
     if (!lastDescription) lastDescription = {name, oldval, newval, desc};
     let e: Error = null as any;
     try {
@@ -245,7 +287,7 @@ export async function AFTER_TRANSACTION(a:(newState: DState)=>void) { after_tran
 export async function AFTER_UPDATE(a:(newState: DState)=>void) { after_transaction.push((s)=>setTimeout(()=>a(s), 1)); }
 
 // to be executed in reducer, for internal jjodel usage, users should never call it.
-export async function DO_AFTER_TRANSACTION_NOT_FOR_USERS(newState: DState) {
+export async function DO_AFTER_TRANSACTION_NOT_FOR_USERS(newState: DState, liveChange: boolean = false) {
     // console.log('DO_AFTER_TRANSACTION_NOT_FOR_USERS len:', after_transaction.length);
     if (after_transaction.length) {
         let callback: (...argss:any)=>void = null as any;
@@ -322,15 +364,15 @@ export class Action extends RuntimeAccessibleClass {
     commit(): boolean{
         return COMMIT(this);
     }
-    fire(forceRelaunch: boolean = false): boolean {
+    fire(forceRelaunch: boolean = false, isCompositeAction = false): boolean {
         if (this.hasFired && !forceRelaunch) return false;
         if (this.value && this.value.__isProxy) {
             Log.ee("Attempted to set a proxy object inside the store.", {action:this, value: this.value});
             return false;
         }
         this.hasFired++;
-        if (U.liveStateChanges) {
-            transientProperties.livePatches = reducer(transientProperties.livePatches || store.getState(), this, true);
+        if (U.liveStateChanges && !isCompositeAction) {
+            transientProperties.livePatches = reducer(DState.getState(), this, true);
         }
         if (t.hasBegun) {
             t.pendingActions.push(this);
@@ -466,7 +508,7 @@ export class SetRootFieldAction extends Action {
         /* no need, the reducer should return old state in this case. verify it!
         if (doChecks) {
             // if action would not change the value, i don't fire it at all
-            let s: GObject<DState> = store.getState();
+            let s: GObject<DState> = DState.getState();
             let field = (this.field||'');
             let accessOperator: string = field.substring(field.length-2);
             let fieldpath: string[] = field.split(".");
@@ -792,8 +834,8 @@ export class CompositeAction extends Action {
         if (launch) this.fire();
     }
     fire(forceRelanch?: boolean): boolean{
-        if (!this.actions.length) return false;
-        return super.fire(forceRelanch);
+        if (!forceRelanch && !this.actions.length) return false;
+        return super.fire(forceRelanch, true);
     }
 }
 

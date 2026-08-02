@@ -593,47 +593,70 @@ ret .b = 3
 
 
 // then add to it: content of props, constants, usageDeclarations
-
-export function reducer(oldState: DState = initialState, action: Action, liveChange: boolean = false): DState {
+export function reducer(oldState: DState = initialState, action: Action, isLiveChange: boolean = false): DState {
+    console.warn("reducer", {action, isLiveChange});
+    if (!oldState) {
+        DState.current = initialState = oldState = DState.new();
+        console.error("############## state initialized", DState.current, DState.current?.idlookup);
+    }
     if (U.navigating) return oldState;
     if (!windoww.jjactions) windoww.jjactions = [];
     windoww.jjactions.push(action);
-    let safeMode = false;
+
     if (U.debug) console.log('execute action', action);
-    if (!safeMode) {
-        let ret = unsafereducer(oldState, action);
+    if (!U.safeMode) {
+        let ret = unsafereducer(oldState, action, isLiveChange);
         DO_AFTER_TRANSACTION_NOT_FOR_USERS(ret);
-        DState.current = ret;
         return ret;
     }
 
     try {
-        let ret = unsafereducer(oldState, action);
+        let ret = unsafereducer(oldState, action, isLiveChange);
         DO_AFTER_TRANSACTION_NOT_FOR_USERS(ret);
-        DState.current = ret;
         return ret;
     }
     catch (e: any) {
         console.error('unhandled error in reducer', {e, oldState, action, stack: (e?.stack || "").split("\n")});
+        if (!isLiveChange) transientProperties.livePatches = oldState;
         DState.current = oldState;
         return oldState;
     }
 }
 
-function unsafereducer(oldState: DState = initialState, action: Action): DState {
-    if (!oldState) { oldState = initialState = DState.new(); }
-    // console.log('external REDUCER', {action, CEtype:CreateElementAction.type});
+function unsafereducer(oldState: DState = initialState, action: Action, isLiveChange: boolean = false): DState {
+    let ret: DState;
+    // making livechanges persistent, if liveChanges are enabled && did not abort
+    let outcome = "?";
 
-    const ret = _reducer(oldState, action);
+    if (!isLiveChange && U.liveStateChanges) {
+        if (!transientProperties.livePatches) outcome = "live change rejected";
+        // should never happen, abort is handled in FINAL_END without triggering a compositeAction.
+        if (!transientProperties.livePatches) return oldState;
+        outcome = "live change accepted";
+        ret = transientProperties.livePatches;
+        updateStateHistory(ret, oldState, action);
+        (ret as any).fromLP = ((ret as any).fromLP || 0) +1;
+    }
+    // make either normal state change or livecange which is not persistent (reducer manually called on a copy of state)
+    else {
+        outcome = "ordinary "+(isLiveChange?"live-":'')+"change";
+        ret = _reducer(oldState, action, isLiveChange);
+        (ret as any).fromLP = ((ret as any).fromLP || 0) +0.0001;
+    }
+// action line 173 if (U.liveStateChanges) t.pendingActions = [];  caused not update of reaxt
+    console.warn("reducher didchange: ", {outcome, b:ret === oldState, ret, oldState, action, isLiveChange})
     if (ret === oldState) return oldState;
     // client synchronization stuff
     if (Collaborative.online) Collaborative.send(action);
     if (!ret) return ret;
     return postReducer(ret, oldState);
 }
-function postReducer(ret: DState, oldState: DState): DState {
+
+function postReducer(ret: DState, oldState: DState, liveChange: boolean = false): DState {
     ret.idlookup.__proto__ = DPointerTargetable.pendingCreation as any;
     ret.clonedCounter = (ret.clonedCounter || 0) +1;
+    if (!liveChange) transientProperties.livePatches = ret;
+    DState.current = ret;
 
     function filterSet<T extends any>(r: T[]): Set<T>{
         if (!Array.isArray(r)) r = [];
@@ -1145,8 +1168,7 @@ function doUndoRedo(oldState: DState, action: Action, isUndo:'undo'|'redo'): DSt
 }
 
 const allowFixingNullArr: boolean = false;
-export function _reducer/*<S extends StateNoFunc, A extends Action>*/(oldState: DState = initialState, action: Action): DState{
-    const mergeTolerance = U.UpdatingTimer*1.5;
+export function _reducer/*<S extends StateNoFunc, A extends Action>*/(oldState: DState = initialState, action: Action, isLiveChange: boolean): DState{
 
     switch (action.type) {
         case UndoAction.type: return doUndoRedo(oldState, action, 'undo');
@@ -1180,83 +1202,92 @@ export function _reducer/*<S extends StateNoFunc, A extends Action>*/(oldState: 
                     ret.action_description = '';
                 }
             }
+            if (isLiveChange) return ret;
             if (!oldState/* || !Object.keys(delta).length*/) return ret;
 
-            // update state history
-            let delta = Uobj.objectDelta(ret, oldState, true, false);
-            if (U.debug) console.log('reducer delta', {start:oldState, end: ret, delta});
-            let debug = Uobj.applyObjectDelta(ret, delta, false, oldState);
-            delta.timestamp = ret.timestamp;
-            delta.timestampdiff = ret.timestampdiff = ret.timestamp - (oldState?.timestamp || 0);
-            if (!statehistory[action.sender]) statehistory[action.sender] = new UserHistory();
-            let pastDelta = statehistory[action.sender].undoable[statehistory.all.undoable.length-1];
-            const allowMerge = true; // switch for debugging
-            let isRelevantChange = isRelevantChangeCheck(delta as GObject<DState>, pastDelta as GObject<DState>);
-            // merge if: there is a past delta, and the delta doesn't pass the filter to exist individually
-            let shouldMerge = !isRelevantChange;
-            let debugMerge = true;
-            if (!shouldMerge && (delta.vertexs || delta.graphvertexs || delta.graphelements || delta.edgepoints || delta.edges || delta.graphs)) shouldMerge = true;
-            if (!pastDelta) shouldMerge = false;
-
-            if (false && pastDelta) console.log("merge deltas", {forVertex:delta.vertexs || delta.graphvertexs || delta.graphelements || delta.edgepoints || delta.edges || delta.graphs,
-                isRelevantChange,
-                shouldMerge, irl: pastDelta && (delta?.timestamp||0) - pastDelta.timestamp < mergeTolerance,
-                 dt: delta.timestamp, pdt: pastDelta.timestamp, diff: (delta?.timestamp||0) - pastDelta.timestamp,
-                oldState, delta});
-
-            //todo: for cooperative prevent merge from different authors, store user in delta from action.sender when you set timestamp.
-            if (shouldMerge && allowMerge) {
-                // pastDelta = Uobj.applyObjectDelta(pastDelta, delta); no because special handling
-                //   of __jjisEmpty etc must not be done at this stage.
-                let gdelta: Dictionary<string, string[] | GObject> = {};
-                let allkeys: Set<string> = new Set([...Object.keys(delta), ...Object.keys(pastDelta)]);
-                let mergeRecompileArr = (k: string) => {
-                    // todo: reenable fix last line but remember they can be either true arrays or delta object fake arrays __jjObjDiffIsArr = true
-                    return;
-                    if (!(k.indexOf('RECOMPILE') >= 0 || k.indexOf('ELEMENT_') >= 0 || k === 'ClassNameChanged')) return;
-                    if (k === 'ClassNameChanged') {
-                        let merged: Dictionary<string> = {};
-                        for (let p of allkeys) {
-                            let vnow = (delta as GObject)[k][p];
-                            let vpast = pastDelta[k][p];
-                            if (vnow === vpast) { merged[p] = vnow; continue; }
-                            if (vnow.indexOf('__jjObjDiff') !== -1) { merged[p] = vpast; continue; }
-                            merged[p] = vnow;
-                        }
-                        gdelta.ClassNameChanged = merged;
-                        return;
-                    }
-                    // todo: this is troublesome because ['id1', 'empty'] + ['id2'] =  ['id1', 'empty', 'id2'] but should not have side effects? can the empty sparse arr make problems?
-                    if (!Array.isArray((delta as GObject)[k] || [])) console.error('mergerecompilearr err',
-                        {sm:shouldMerge, pd:!!pastDelta, delta, pastDelta, k, dk: (delta as any)?.[k], pdk: pastDelta?.[k]});
-                    if (!Array.isArray((delta as GObject)[k]||[])) console.log('err in delta merge', {arr:(delta as GObject)[k]||[], delta, k});
-                    if (!Array.isArray((pastDelta as GObject)[k]||[])) console.log('err in past delta merge', {arr:(pastDelta as GObject)[k]||[], pastDelta, k});
-                    gdelta[k] = [...new Set(U.arrayMergeInPlace((delta as GObject)[k]||[], pastDelta[k]||[]))] as string[];
-                }
-
-                for (let k of allkeys) mergeRecompileArr(k);
-                U.objectMergeInPlace(pastDelta, delta);
-                delta = pastDelta; // must be inaccessible now as it merged with pastdelta, use that instead
-                for (let k in gdelta) {
-                    if (Array.isArray(gdelta[k])) pastDelta[k] = gdelta[k].filter((e:string) => e && e.indexOf('__jjObjDiff') === -1);
-                    else pastDelta[k] = gdelta[k];
-                }
-                if (debugMerge) (ret as any).mergeCounter = (pastDelta as any).mergeCounter = 1+((ret as any).mergeCounter||0)
-            }
-            else if (isRelevantChange) {
-                let user = (action as Action).sender;
-                statehistory[user].undoable.push(delta);
-                statehistory.all.undoable.push(delta);
-                if (debugMerge) {
-                    if (shouldMerge) (ret as any).notMergeCounter = (delta as any).notMergeCounter = 1+((ret as any).notMergeCounter || 0)
-                    else (ret as any).notMergeCounter = 0;
-                }
-            }
+            updateStateHistory(ret, oldState, action);
 
             return ret;
     }
 }
 
+function updateStateHistory(ret: DState, oldState: DState, action: Action): void {
+    const mergeTolerance = U.UpdatingTimer*1.5;
+
+    // update state history
+    let delta = Uobj.objectDelta(ret, oldState, true, false);
+    if (U.debug) console.log('reducer delta', {start:oldState, end: ret, delta});
+    let debug = Uobj.applyObjectDelta(ret, delta, false, oldState);
+    delta.timestamp = ret.timestamp;
+    delta.timestampdiff = ret.timestampdiff = ret.timestamp - (oldState?.timestamp || 0);
+    if (!statehistory[action.sender]) statehistory[action.sender] = new UserHistory();
+    let pastDelta = statehistory[action.sender].undoable[statehistory.all.undoable.length-1];
+    const allowMerge = true; // switch for debugging
+    let isRelevantChange = isRelevantChangeCheck(delta as GObject<DState>, pastDelta as GObject<DState>);
+    // merge if: there is a past delta, and the delta doesn't pass the filter to exist individually
+    let shouldMerge = !isRelevantChange;
+    let debugMerge = true;
+    if (!shouldMerge && (delta.vertexs || delta.graphvertexs || delta.graphelements || delta.edgepoints || delta.edges || delta.graphs)) shouldMerge = true;
+    if (!pastDelta) shouldMerge = false;
+
+    if (false && pastDelta) console.log("merge deltas", {forVertex:delta.vertexs || delta.graphvertexs || delta.graphelements || delta.edgepoints || delta.edges || delta.graphs,
+        isRelevantChange,
+        shouldMerge, irl: pastDelta && (delta?.timestamp||0) - pastDelta.timestamp < mergeTolerance,
+        dt: delta.timestamp, pdt: pastDelta.timestamp, diff: (delta?.timestamp||0) - pastDelta.timestamp,
+        oldState, delta});
+
+    //todo: for cooperative prevent merge from different authors, store user in delta from action.sender when you set timestamp.
+    if (shouldMerge && allowMerge) {
+        // pastDelta = Uobj.applyObjectDelta(pastDelta, delta); no because special handling
+        //   of __jjisEmpty etc must not be done at this stage.
+        let gdelta: Dictionary<string, string[] | GObject> = {};
+        let allkeys: Set<string> = new Set([...Object.keys(delta), ...Object.keys(pastDelta)]);
+        let mergeRecompileArr = (k: string) => {
+            // todo: reenable fix last line but remember they can be either true arrays or delta object fake arrays __jjObjDiffIsArr = true
+            return;
+            if (!(k.indexOf('RECOMPILE') >= 0 || k.indexOf('ELEMENT_') >= 0 || k === 'ClassNameChanged')) return;
+            if (k === 'ClassNameChanged') {
+                let merged: Dictionary<string> = {};
+                for (let p of allkeys) {
+                    let vnow = (delta as GObject)[k][p];
+                    let vpast = pastDelta[k][p];
+                    if (vnow === vpast) { merged[p] = vnow; continue; }
+                    if (vnow.indexOf('__jjObjDiff') !== -1) { merged[p] = vpast; continue; }
+                    merged[p] = vnow;
+                }
+                gdelta.ClassNameChanged = merged;
+                return;
+            }
+            // todo: this is troublesome because ['id1', 'empty'] + ['id2'] =  ['id1', 'empty', 'id2'] but should not have side effects? can the empty sparse arr make problems?
+            if (!Array.isArray((delta as GObject)[k] || [])) console.error('mergerecompilearr err',
+                {sm:shouldMerge, pd:!!pastDelta, delta, pastDelta, k, dk: (delta as any)?.[k], pdk: pastDelta?.[k]});
+            if (!Array.isArray((delta as GObject)[k]||[])) console.log('err in delta merge', {arr:(delta as GObject)[k]||[], delta, k});
+            if (!Array.isArray((pastDelta as GObject)[k]||[])) console.log('err in past delta merge', {arr:(pastDelta as GObject)[k]||[], pastDelta, k});
+            gdelta[k] = [...new Set(U.arrayMergeInPlace((delta as GObject)[k]||[], pastDelta[k]||[]))] as string[];
+        }
+
+        for (let k of allkeys) mergeRecompileArr(k);
+        U.objectMergeInPlace(pastDelta, delta);
+        delta = pastDelta; // must be inaccessible now as it merged with pastdelta, use that instead
+        for (let k in gdelta) {
+            if (Array.isArray(gdelta[k])) pastDelta[k] = gdelta[k].filter((e:string) => e && e.indexOf('__jjObjDiff') === -1);
+            else pastDelta[k] = gdelta[k];
+        }
+        if (debugMerge) (ret as any).mergeCounter = (pastDelta as any).mergeCounter = 1+((ret as any).mergeCounter||0)
+    }
+    else if (isRelevantChange) {
+        let user = (action as Action).sender;
+        statehistory[user].undoable.push(delta);
+        statehistory.all.undoable.push(delta);
+        if (debugMerge) {
+            if (shouldMerge) (ret as any).notMergeCounter = (delta as any).notMergeCounter = 1+((ret as any).notMergeCounter || 0)
+            else (ret as any).notMergeCounter = 0;
+        }
+    }
+}
+
+
+// used to determine if 2 deltas needs to be merged in a single undo action
 function isRelevantChangeCheck(delta: GObject<DState>, pastDelta?: GObject<DState>): boolean {
     const mergeTolerance = U.UpdatingTimer*1.5;
 
@@ -1390,7 +1421,7 @@ function setDocumentEvents(){
             })
         , 1);
     // document.body.addEventListener("mousedown", fixResizables, false);
-    setInterval(()=>{ COMMIT(undefined, false) }, windoww.U.UpdatingTimer);
+    setInterval(()=> { COMMIT(undefined, false, true) }, windoww.U.UpdatingTimer);
 }
 function fixResizables(e: MouseEvent){
     /*let parents = U.ancestorArray(e.target as HTMLElement);
@@ -1505,7 +1536,7 @@ export async function stateInitializer() {
             console.log('12 project load api response', {project, isOff:U.isOffline(), userid:DUser.current, user:DUser.getUser()});
 
             if (!project.state) {
-                // state = {...store.getState()} as DState; // NEEDS TO BE SHALLOW COPIED or the state won't update. new project just created, never saved.
+                // state = {...DState.getState()} as DState; // NEEDS TO BE SHALLOW COPIED or the state won't update. new project just created, never saved.
                 // }
                 Constructors.persist(project);
                 recursiveCheck();

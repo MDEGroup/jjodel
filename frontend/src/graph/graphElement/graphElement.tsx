@@ -922,7 +922,7 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
     private doOnClick(e: React.MouseEvent): boolean {
         // (e.target as any).focus();
         e.stopPropagation();
-        let state: DState = store.getState();
+        let state: DState = DState.getState();
         const target = (e.target as HTMLElement);
         switch (target.tagName.toLowerCase()) {
             case "select":
@@ -1218,6 +1218,8 @@ export class GraphElementComponent<AllProps extends AllPropss = AllPropss, Graph
         styleoverride['--total-zoom-y'] = totalZoom.y;
         styleoverride['--own-zoom-x'] = ownZoom.x;
         styleoverride['--own-zoom-y'] = ownZoom.y;
+        U.debugSimulateSlow();
+        console.warn("graphelement updated:", this.props.data?.name);
 
         if (this.props.isGraph){
             let offset = (this.props.node as any as LGraph).offset;

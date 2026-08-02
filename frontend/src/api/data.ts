@@ -204,7 +204,7 @@ export class EcoreParser{
         let d_Estring: DClassifier = Selectors.getAllPrimitiveTypes()[1];
         replacePrimitiveMap[AttribETypes.EString] = d_Estring;
         // todo: do the same for all other primitives
-        let state: DState = store.getState();
+        let state: DState = DState.getState();
 
         // let longprefixlength = 'ecore:EDataType http://www.eclipse.org/emf/2002/Ecore'.length;
         const typeprefix = "#//";

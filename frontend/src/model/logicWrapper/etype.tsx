@@ -223,15 +223,16 @@ export class GenericType {
             "like: class IntegerStack extends Array<Integer> { .. }"}
     public static desc_object: Info = {type: "GenericType", txt: "Type parameters used to create an object whose class have generic typings."}
     public static desc_value: Info = {type: "GenericType", txt: GenericType.desc_object.txt }
-    public static descTypeParameters: Info = {type: "TypeDeclaration[]", txt: "Type parameters attached to the classifier, like in HashMap<K, V>"}
+    public static descTypeParameters: Info = {type: "TypeDeclaration[]", txt: "Type parameters attached to the classifier or function definition, like in HashMap<K, V>"}
+    public static descAllTypeParameters: Info = Info.typeDeclarations;
 
 
     static serializeETypeParameter(...a: Parameters<typeof serializeETypeParameter>): ReturnType<typeof serializeETypeParameter> {
         return serializeETypeParameter(...a);
     }
 
-    static serializeGenericType(...a: Parameters<typeof serializeGenericType>): ReturnType<typeof serializeGenericType> {
-        return serializeGenericType(...a);
+    static serializeECoreGenericType(...a: Parameters<typeof serializeECoreGenericType>): ReturnType<typeof serializeECoreGenericType> {
+        return serializeECoreGenericType(...a);
     }
 
     // use lTypeDeclaration.toString instead
@@ -373,7 +374,7 @@ export class GenericType {
         return Object.values(o).map( e => GenericType.serializeJOM(e)).join(", ");
     }
 
-    public static serializeEcore(type: EGenericType, m: LModel, asID = true){ return serializeGenericType(type, m, asID); }
+    public static serializeEcore(type: EGenericType, m: LModel, asID = true){ return serializeECoreGenericType(type, m, asID); }
     public static serializeJOM(o0: GenericType | TYPE | LClass): string {
         let to = typeof o0;
         if (to === "string") {
@@ -900,7 +901,7 @@ export function serializeETypeParameter(arr: ETypeParameter[], m: LModel, asID: 
 
         // Check if the parameter has an upper bound (extends clause)
         if (param.ebounds) {
-            const boundStr = normalizeArray(param.ebounds).map(b=>serializeGenericType(b, m, asID) || fallback).join( " & ");
+            const boundStr = normalizeArray(param.ebounds).map(b=>serializeECoreGenericType(b, m, asID) || fallback).join( " & ");
             if (boundStr) paramStr += ` extends ${boundStr}`;
         }
         return paramStr;
@@ -910,7 +911,7 @@ export function serializeETypeParameter(arr: ETypeParameter[], m: LModel, asID: 
 /**
  * Helper function to recursively serialize ebounds / etypearguments GObjects.
  */
-export function serializeGenericType(gType: EBound, m: LModel, asID: boolean = true): string | null {
+export function serializeECoreGenericType(gType: EBound | EGenericType, m: LModel, asID: boolean = true): string | null {
     const fallback = null;
     if (!gType) return fallback;
     gType = normalizeEcoreKeys(gType);
@@ -924,7 +925,7 @@ export function serializeGenericType(gType: EBound, m: LModel, asID: boolean = t
         let args: string = "";
         let arr = normalizeArray(gType.etypearguments);
         if (arr && arr.length > 0) {
-            args = arr.map((arg) => serializeGenericType(arg, m, asID) || fallback)
+            args = arr.map((arg) => serializeECoreGenericType(arg, m, asID) || fallback)
                 .join(", ");
         }
         return baseName + (args.length ? `<${args}>` : "");
@@ -937,14 +938,14 @@ export function serializeGenericType(gType: EBound, m: LModel, asID: boolean = t
 
     // Case 3: Wildcards (? / ? extends T / ? super T)
     // Neither eclassifier nor etypeparameter is set here
-    if (gType.eupperbound) return `? extends ${serializeGenericType(gType.eupperbound, m, asID) || fallback}`;
-    if (gType.elowerbound) return `? super ${serializeGenericType(gType.elowerbound, m, asID) || fallback}`;
+    if (gType.eupperbound) return `? extends ${serializeECoreGenericType(gType.eupperbound, m, asID) || fallback}`;
+    if (gType.elowerbound) return `? super ${serializeECoreGenericType(gType.elowerbound, m, asID) || fallback}`;
     // Pure wildcard: List<?>
     return "?";
 }
 
 let windoww = window as any;
-windoww.serializeGenericType = serializeGenericType;
+windoww.serializeECoreGenericType = serializeECoreGenericType;
 windoww.serializeETypeParameter = serializeETypeParameter;
 windoww.test = test;
 setTimeout(()=>{

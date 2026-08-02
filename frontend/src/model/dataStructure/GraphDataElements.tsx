@@ -237,6 +237,18 @@ export class LGraphElement<Context extends LogicContext<DGraphElement> = any, C 
         return U.findInChildProperties(arr, (e)=>[e.father], undefined, (e)=>e.rendered);
     }*/
 
+    toString(): string { return this.wrongAccessMessage("toString"); }
+    get_toString(c: Context): ()=>string { return ()=>JSON.stringify(c.data); }
+    serializable(): string { return this.wrongAccessMessage("serializable"); }
+    get_serializable(c: Context): GObject {
+    //return  ()=>{
+        let o: Partial<GObject<DGraphElement>> = c.data
+        // delete o.view;
+        return o;
+    //}();
+    }
+
+
     get_getByFullPath(c: Context): this['getByFullPath'] {
         return (path: string | string[]): L | null => {
             let patharr = Array.isArray(path) ? path : path.split('.');
@@ -800,7 +812,7 @@ export class LGraphElement<Context extends LogicContext<DGraphElement> = any, C 
 
         TRANSACTION(this.get_name(context as any)+'.subElements', ()=> {
             SetFieldAction.new(context.data, 'subElements', pointers, '', true);
-            const idlookup = store.getState().idlookup;
+            const idlookup = DState.getState().idlookup;
             let arrdiff = U.arrayDifference(context.data.subElements, pointers);
             // old subelements
             for (let oldsubelementid of arrdiff.removed) {
@@ -825,7 +837,7 @@ export class LGraphElement<Context extends LogicContext<DGraphElement> = any, C 
         txt: "all deep subelements (nodes, edges, edgepoints, subgraphs...). including subelements of subelements."}
     private get_allSubElements(context: Context, state?: DState): this["allSubElements"] {
         // return context.data.packages.map(p => LPointerTargetable.from(p));
-        state = state || store.getState();
+        state = state || DState.getState();
         let tocheck: Pointer<DGraphElement>[] = context.data.subElements || [];
         let checked: Dictionary<Pointer, true> = {};
         let dblcheck: Dictionary<Pointer, Pointer> = {}; // <child, parent>  // debug only

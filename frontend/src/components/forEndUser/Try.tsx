@@ -53,7 +53,7 @@ class Report{
     constructor(e: Error, info?: React.ErrorInfo, msg?:LoggerCategoryState) {
         this._id = (e as any).id;
         this.e = {message:e.message, stack: (e.stack||'')}//.split('\n')};
-        this.state = store.getState();
+        this.state = DState.getState();
         this.version = ""+this.state.version.n;
         this.url = window.location.href;
         this.history = statehistory;

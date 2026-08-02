@@ -101,8 +101,8 @@ export class DState extends DPointerTargetable{
     }
 
     static getState(patched: boolean = true): DState {
-        if (!patched) return store.getState();
-        else return transientProperties.livePatches || store.getState();
+        if (!patched || !U.liveStateChanges) return DState.current; // store.getState();
+        else return transientProperties.livePatches || DState.current; // store.getState();
         // else return Uobj.applyObjectDelta(store.getState(), transientProperties.livePatches, false)
     }
 
@@ -365,6 +365,7 @@ otherwise you would click the edge container instead of the graph-elements benea
     }
 }
 
+(window as any).s = DState.getState;
 
 function makeDefaultGraphViews(vp: DViewPoint, validationVP: DViewPoint): DViewElement[] {
     let errorOverlayView: DViewElement = DViewElement.new2('Generic error view', DV.semanticErrorOverlay(), validationVP, (v) => {
@@ -695,7 +696,7 @@ export class LState<Context extends LogicContext<DState> = any, C extends Contex
     public static structure: typeof DPointerTargetable;
     public static singleton: LPointerTargetable;
     // return type is wrong, but have to extend the static method of RuntimeAccessibleClass which is completely different and returns a class constructor.
-    static get<T2 extends typeof RuntimeAccessibleClass & { logic?: typeof LPointerTargetable | undefined; }>(): T2 & LState { return LState.wrap(store.getState() as any) as any; }
+    static get<T2 extends typeof RuntimeAccessibleClass & { logic?: typeof LPointerTargetable | undefined; }>(): T2 & LState { return LState.wrap(DState.getState() as any) as any; }
     user!: LUser;
     advanced!: boolean;
     debug!: boolean;

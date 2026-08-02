@@ -113,18 +113,40 @@ WARNING! do not set proxies in the state, set pointers instead.<br/>
             'shapeless objects are always partial.\n' +
             'undefined means the property is inherited by his metamodel class, a boolean value means it overrides it.'}
 
-    static namee = {type:'string', txt: 'The name of an element, must be a valid identifier.\n' +
+    static name_fallback = {type:'string', txt: 'The name of an element, must be a valid identifier.\n' +
             'In case an object have a feature called "name", the feature value will override the object\'s name.\n' +
             'Attributes named "name" will be EID by default, and can be navigated with $ syntax (eg: object.$childName) unless deactivated.\n' +
-            'Read EID for more information.',
+            'Annotations name are used as an utility making the last segment of their \"source\" URI.\n' +
+            'Read the help for EID or annotation.name for more information.',
+        dependencies: [["this"]]
+    }
+    static name_forObjects = {type:'string', txt: Info.name_fallback.txt,
         dependencies: [["$name"]]
     }
+    static name_forAnnotations = {type: "string", txt: <div>Name is not an actual property of ecore's EAnnotation, we kept it as an <b>optional</b> utility.
+        You can set a fixed uri and change the name which gets appended to the "source" uri.
+        Exports to .ecore will append the name (if present) to the "source" uri.</div>}
 
-    static eid = {type: "LValue | null", txt: "if present, gets the value of the feature with isID == true",
-        // NB: cannot have a "$" dependency here or it breks everything
+    // todo: split this declaration and dependencies for m1 and m2. instead of inheriting make a personal copy for all m1 and m2 classes
+    static eid_forObjects = {type: "string", txt: "if present, gets the serialized value of the feature with isID == true.",
+        // NB: cannot have a "$" dependency here or it breaks everything
     dependencies: [["eidFeature"]]}
 
+    static eid_fallback: Info = {type: ShortAttribETypes.EString,
+        txt: "eid is a property of objects used to identify them from user values (check description for m1 objects)." +
+            "\nFor other elements, eid is an alias for name, which is used as identifier in his place."+
+            "\nSubElements can be accessed by eid or name with $ syntax." +
+            "\nEg: container.$foo retrieves the sub-element with eid or name \"foo\" inside \"container\"." +
+            "\nIf eid contains a space or a character not valid in identifier, array syntax [\"$foo\"] must be used." +
+            "\nEg: model.$AlexandriaLibrary[\"$Epic of Gilgamesh\"].$year.value" +
+            "\nnavigates the following objects:" +
+            "\nmodel: Model, AlexandriaLibrary: Object<Library>, \"Epic of Gilgamesh: Object<Book>\", year: Feature<Date>, value: Date",
+        dependencies: Info.name_fallback.dependencies}
+
     static eidFeature = {type: "LValue | null", txt: "if present, gets the structural feature with isID == true",
-    dependencies: [["eidFeature"]]};
+        dependencies: [["eidFeature"]]};
+
+    static typeDeclarations: Info = {type: "LTypeDeclaration[]", txt: "Collection of all type declarations (typeParameters) in current scope, declared either from this element or container elements."};
+
 
 }

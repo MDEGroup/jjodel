@@ -14,7 +14,7 @@ import {
     Constructors,
     SetFieldAction,
     SetRootFieldAction,
-    TRANSACTION
+    TRANSACTION, DState, GObject
 } from '../../joiner';
 import DockManager from '../abstract/DockManager';
 import TabDataMaker from '../abstract/tabs/TabDataMaker';
@@ -43,7 +43,7 @@ interface OpenMenu {
  * Get the engine (platform) version from the Redux store
  */
 const getEngineVersion = (): string => {
-    const state = store.getState();
+    const state = DState.getState();
     return `v${state.version?.n || '2.0'}`;
 };
 
@@ -911,7 +911,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                     // Method 2: Check __raw.instanceof and resolve via Redux state
                     if (!className && (obj as any).__raw?.instanceof) {
                         const classPointer = (obj as any).__raw.instanceof;
-                        const state = store.getState() as any;
+                        const state = DState.getState() as GObject<DState>;
                         const classData = state[classPointer];
                         if (classData && classData.name) {
                             className = classData.name;
@@ -997,7 +997,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
 
                 // CRITICAL: Get fresh model names from Redux store, NOT from stale component state
                 // This ensures we catch recently created models that haven't triggered a re-render yet
-                const freshState = store.getState() as any;
+                const freshState = DState.getState() as any;
                 const freshExistingNames: string[] = [];
 
                 // Iterate through state and collect all model/metamodel names
@@ -1265,7 +1265,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
         }
     };
 
-    const versionList = store.getState().version.conversionList;
+    const versionList = DState.getState().version.conversionList;
     return (
         <div className="project-editor">
             {/* Header */}

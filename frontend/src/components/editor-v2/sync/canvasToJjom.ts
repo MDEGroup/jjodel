@@ -19,7 +19,7 @@ import {
     DEdge,
     DVoidEdge,
     GraphSize,
-    store,
+    store, DState,
 } from '../../../joiner';
 import { markCanvasUpdated, markCanvasUpdatedBatch } from './syncState';
 
@@ -775,7 +775,7 @@ export interface ModelInfoData {
 
 export function getModelInfo(modelid: string): ModelInfoData | null {
     try {
-        const state = store.getState();
+        const state = DState.getState();
         const dModel = state.idlookup?.[modelid] as any;
         if (!dModel) return null;
 

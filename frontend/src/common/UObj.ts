@@ -219,6 +219,7 @@ export class Uobj {
             }
         }
 
+        if (location.hostname !== "localhost" && (!window as any).assertdebug) asserteq = undefined;
         if (asserteq) {
             let _as = stringify(asserteq);
             let _rs = stringify(statelevel);

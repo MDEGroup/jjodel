@@ -244,7 +244,7 @@ export abstract class RuntimeAccessibleClass extends AbstractMixedClass {
     (data: D[] | Pointer<DPointerTargetable, 0, 'N'>, baseObjInLookup?: undefined, path: '' = '', canThrow: CAN_THROW = false as CAN_THROW, state?: DState, filter:boolean=true): CAN_THROW extends true ? L[] : L[] {
         if (!Array.isArray(data)) return [];
         if (!data.length) return [];
-        if (!state) state = windoww.store.getState() as DState;
+        if (!state) state = windoww.DState.getState() as DState;
         if (!filter) return data.map( d => DPointerTargetable.wrap(d, baseObjInLookup, path, canThrow, state)) as L[];
         let ret = [];
         for (let o of data) { if (o) ret.push( DPointerTargetable.wrap(o, baseObjInLookup, path, canThrow, state))}
@@ -280,7 +280,7 @@ export abstract class RuntimeAccessibleClass extends AbstractMixedClass {
     public static attemptWrap(v: any, s?: DState): any{
         let ret: any = undefined;
         switch (typeof v){
-            case "string": s = store.getState(); ret = LPointerTargetable.fromPointer(v, s); break
+            case "string": s = DState.getState(); ret = LPointerTargetable.fromPointer(v, s); break
             case "object":
                 if (!v) return v; // null
                 if (v.__isProxy) return v;
@@ -297,7 +297,7 @@ export abstract class RuntimeAccessibleClass extends AbstractMixedClass {
         static mapWrap2<D extends DPointerTargetable, L extends LPointerTargetable>(map: RuntimeAccessibleClass, container: D, baseObjInLookup?: DPointerTargetable, path: string = ''): L{
             if (!map || (map as any).__isProxy) return map as any;
             if (typeof container === 'string') {
-                container = store.getState().idlookup[container] as unknown as D;
+                container = DState.getState().idlookup[container] as unknown as D;
                 if (!container) { return Log.exx('Cannot wrap map:', {map, container, baseObjInLookup, path}); }
             }
             // console.log('ProxyWrapping:', {data, baseObjInLookup, path});
@@ -650,7 +650,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
 
     private setWithSideEffect<D extends DPointerTargetable>(property: string, val: any): this {
         if (!val) return this;
-        if (!this.state) this.state = store.getState();
+        if (!this.state) this.state = DState.getState();
         if (typeof val === "object") val = val.id;
         this.thiss._persistCallbacks.push( () => {
             (LPointerTargetable.from(this.thiss, this.state) as GObject<"L">)[property] = val;
@@ -756,7 +756,6 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         }
         //(thiss as DPointerTargetable)._persistCallbacks.push(()=>{
         // When a feature is added in m2, i loop instanced m1 objects to add that feature as a DValue.
-        let state = store.getState();
         for (let pointer in alreadyParsed) {
             for (let instanceObjPtr of alreadyParsed[pointer].instances) {
                 // this._derivedSubElements.push(_DValue.new(thiss.name, thiss.id, undefined, instanceObjPtr));
@@ -833,7 +832,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss.details = details || {};
         thiss.name = name;
 
-        let s = store.getState();
+        let s = DState.getState();
         this.setPtr("references", references || [], s);
         this.setPtr("contents", contents || [], s);
         for (let r of (contents || [])) {
@@ -1232,8 +1231,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss.edgeHeadSize = new GraphPoint(20, 20);
         thiss.edgeTailSize = new GraphPoint(20, 20);
         if (thiss.className !== 'DViewElement') return this;
-        const user: LUser = LUser.getUser();;
-        // const project = user?.project; if(!project) return this;
+
         if (!vp) vp = LProject.getProject()?.activeViewpoint.id || Defaults.viewpoints[0];
         if (vp !== 'skip') {
             // let dvp = DPointerTargetable.fromPointer(vp);
@@ -1286,7 +1284,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         let user: DUser = DUser.getUser();
         /*if (!user as any) {
             let str = localStorage.getItem('user');
-            let state = store.getState();
+            let state = DState.getState();
             let idlookup = state.idlookup;
             if (str) user = JSON.parse(str) as any as DUser;
             else user = idlookup[DUser.current || state.users[0]] as DUser;
@@ -1317,10 +1315,8 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss._subMaps = {zoom: true, graphSize: true}
         thiss.grid = undefined; // {x: 0, y: 0, type: 'cartesian', center: 'cc', visible: true};
 
-        const user: LUser = LUser.getUser();
-        const project = LProject.getProject();
         if (thiss.className === 'DGraph') { // to exclude GraphVertex
-            project && this.setExternalPtr(project.id, 'graphs', "+=");
+            this.setExternalPtr(U.getProjectID_URL(), 'graphs', "+=");
             thiss.x = 0;
             thiss.y = 0;
             thiss.w = 0;
@@ -1496,7 +1492,7 @@ export class DPointerTargetable extends RuntimeAccessibleClass {
                 ),
         INFERRED = {ret: RET, upp: UPP, low:LOW, ddd: DDD, dddARR: DDDARR, lowARR: LOWARR, uppARR: UPPARR},>(ptr: T, s?: DState)
         : RET {
-        s = s || store.getState();
+        s = s || DState.getState();
         if (!ptr) { return ptr as any; }
         if (Array.isArray(ptr)) {
             return ptr.map( (p: Pointer) => DPointerTargetable.fromPointer(p, s)) as any;
@@ -1507,7 +1503,7 @@ export class DPointerTargetable extends RuntimeAccessibleClass {
         }
         if (s && s.idlookup[ptr as string]) return s.idlookup[ptr as string] as any;
         return (DPointerTargetable.pendingCreation[ptr as string] || s.idlookup[ptr as string]) as any;
-        // return ((s || store.getState()).idlookup[ptr as string] || DPointerTargetable.pendingCreation[ptr as string]) as any;
+        // return ((s || DState.getState()).idlookup[ptr as string] || DPointerTargetable.pendingCreation[ptr as string]) as any;
     }
 
     static from<// LOW extends number, UPP extends number | 'N',
@@ -1532,7 +1528,7 @@ export class DPointerTargetable extends RuntimeAccessibleClass {
         INFERRED = {ret: RET, RETPTR:RETPTR, upp: UPP, low:LOW, ddd: DDD, dddARR: DDDARR, lowARR: LOWARR, uppARR: UPPARR, LX:LX, DX:DX}>(ptr: PTR | LX, s?: DState)
         : RET {
         if (!ptr) return ptr as any;
-        if (!s) s = store.getState();
+        if (!s) s = DState.getState();
         if (Array.isArray(ptr)) return DPointerTargetable.fromArr(ptr, true, s) as any;
         if ((ptr as LX).__isProxy) return (ptr as LX).__raw as any;
         if (typeof ptr === "string") {
@@ -1544,7 +1540,7 @@ export class DPointerTargetable extends RuntimeAccessibleClass {
     }
     public static fromArr(arr:any[], filter: boolean = true, s?: DState): DPointerTargetable[]{
         let ret: (DPointerTargetable)[] = [];
-        s = s || store.getState();
+        s = s || DState.getState();
         for (let a of arr) {
             let d = DPointerTargetable.from(a, s);
             if (!filter || d) ret.push(d as DPointerTargetable);
@@ -1793,7 +1789,7 @@ export class PendingPointedByPaths{
             this.stackTrace = U.getStackTrace();
     }
     static attemptimplementationdelete(pb: PointedBy) {
-        let state: DState = store.getState();
+        let state: DState = DState.getState();
         let objectChain = U.followPath(state, pb.source);
     }
 
@@ -1990,7 +1986,8 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     public __readonly!: boolean;
     public state!: any;
     public r!:any;
-
+    eid!: string; // in m2: a fallback for name. in m1: ecore id based on m2attribute.isID or m2reference.Ekeys
+    __info_of__eid: Info = Info.eid_fallback;
 
     static isL(val?: unknown): val is LPointerTargetable {
         if (!val) return false;
@@ -2081,7 +2078,7 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     public pointedBy!: PointedBy[];
     // pointedBy!: LPointerTargetable[];
     get_pointedBy(context: Context): LPointerTargetable["pointedBy"] {
-        let state: DState = store.getState();
+        let state: DState = DState.getState();
         let targeting: LPointerTargetable[] = LPointerTargetable.fromArr(context.data.pointedBy.map( p => {
             let s: GObject = state;
             for (let key of PointedBy.getPathArr(p)) {
@@ -2097,7 +2094,7 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     public get__jjdependencies(context: any): Dependency[] {
         const data = context.data;
         const dependencies: Dependency[] = [];
-        let s = store.getState();
+        let s = DState.getState();
         for (let pointedBy of data.pointedBy) {
             let pbyString = pointedBy.source;
             const pathArr: string[] = pbyString.split('.');
@@ -2146,18 +2143,12 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     }
 
     // fallback, eid exists only on lobjects
-    protected get_eid(c: Context): any { return this.get_name(c); }
+    protected get_eid(c: Context): string { return this.get_name(c); }
 
     name!:string;
-    __info_of__name: Info = Info.namee;
+    __info_of__name: Info = Info.name_fallback;
     protected get_name(c: Context): this["name"] {
-        let nameattribute = (c.proxyObject as any).$name;
-        let ret: string = undefined as any;
-        if (nameattribute && nameattribute.className === 'LValue') {
-            ret = nameattribute.value;
-        }
-        if (ret === undefined) ret = c.data.name || c.data.className;
-        return U.toIdentifier(ret || "");
+        return U.toIdentifier(c.data.name || c.data.className.slice(1).toLowerCase());
     }
 
     protected set_name(val: this["name"], c: Context): boolean {
@@ -2345,7 +2336,7 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     }
     protected __shallowSolver<T>(val: any, solveArrayValues: boolean, solveObjectKeys: boolean): any {
         if (!val) return val;
-        let state: DState = store.getState();
+        let state: DState = DState.getState();
         if (solveArrayValues && Array.isArray(val)) {
             if (val.length === 0) return [];
             return val.map(v => LPointerTargetable.attemptWrap(v));
@@ -2425,7 +2416,7 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
 
     /*
     public get_pointedBy(superClassName: string, context: LogicContext<DPointerTargetable>): LPointerTargetable[] {
-        let state: GObject = windoww.store.getState();
+        let state: GObject = windoww.DState.getState();
         function getForemostObjectInPath(path: DocString<'storePath'>): undefined | LPointerTargetable {
             let lastPointableObject: undefined | DPointerTargetable;
             let pathArray = path.split('.');
@@ -2678,7 +2669,7 @@ export class DUser extends DPointerTargetable {
     static subclasses: (typeof RuntimeAccessibleClass | string)[] = [];
     static _extends: (typeof RuntimeAccessibleClass | string)[] = [];
     id!: Pointer<DUser>;
-    _Id?: string // db GUID
+    _Id?: string; // db GUID
     name!: string;
     surname!: string;
     nickname!: string;
@@ -2735,10 +2726,10 @@ export class DUser extends DPointerTargetable {
 
         let d: DUser = DUser.getUser();
         if (d && isValid(d)) return d;
-        let state = store.getState();
+        let state = DState.getState();
         let timer: any = -1;
         let saveToState = ()=>{
-            state = store.getState();
+            state = DState.getState();
             if (!state) return;
             state.idlookup[d.id] = d;
             clearInterval(timer);
@@ -2800,7 +2791,6 @@ export class LUser<Context extends LogicContext<DUser> = any, D extends DUser = 
     __isLUser!: true;
     avatar!: ReactNode;
     index!: number;
-    __info_of__name: Info = Info.namee;
     __info_of__index: Info = {type: ShortAttribETypes.EInt, txt: "Index of the order of joining the collaborative session."}
     get_index(c: Context): this["index"] {
         const project = LProject.getProject();
@@ -2817,7 +2807,7 @@ export class LUser<Context extends LogicContext<DUser> = any, D extends DUser = 
     public static getUser(): LUser{ return LUser.wrap(DUser.getUser()) as LUser; }
     public static replace(user: DUser) {
         DUser.current = user.id;
-        let state = store.getState();
+        let state = DState.getState();
         if (state) state.idlookup[user.id] = user;
     }
 
@@ -2877,7 +2867,7 @@ export class LUser<Context extends LogicContext<DUser> = any, D extends DUser = 
     }
     protected set_name(val: this['name'], c: Context): boolean {
         if (c.data.name === val) return true;
-        TRANSACTION(this.get_name(c)+'.name', ()=>{
+        TRANSACTION(this.get_name(c)+'.name', ()=> {
             SetFieldAction.new(c.data.id, 'name', val, '', false);
         }, undefined, val)
         return true;
@@ -3096,7 +3086,6 @@ export class LProject<Context extends LogicContext<DProject> = any, D extends DP
     collaboratorsMap!: Dictionary<DocString<"socket id">, Pointer<DUser>>;
     onlineUsers!: number;
     name!: string;
-    __info_of__name: Info = Info.namee;
     metamodels!: LModel[];
     models!: LModel[];
     graphs!: LGraph[];
@@ -4101,7 +4090,7 @@ export class NodeTransientProperties{
     }
 
     static sort(tn: NodeTransientProperties, pv: DViewElement | undefined, state0?: DState) {
-        let state: DState = state0 || store.getState();
+        let state: DState = state0 || DState.getState();
         let mainViews: ViewScoreEntry[] = [];
         let decorativeViews: ViewScoreEntry[] = [];
         for (let vid of Object.keys(tn.viewScores)) {
@@ -4195,7 +4184,7 @@ export const transientProperties = {
     view: {} as Dictionary<Pointer<DViewElement>, ViewTransientProperties>,
     modelElement: {} as Dictionary<Pointer<DModelElement>, DataTransientProperties>,
     language: {} as Dictionary<DocString<'Language like ecore'>, Dictionary<DocString<'Engine like nearley, js'>, LanguageCache>>,
-    livePatches: {} as DState, //Partial<DState>,
+    livePatches: null as (DState | null), //Partial<DState>,
 
     /*
         updates all elements with a certain view..

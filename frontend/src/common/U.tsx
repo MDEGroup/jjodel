@@ -185,12 +185,15 @@ export class U {
     private static clickedOutsideMapEntries: Element[] = null as any; // because weak maps are not iterable and cannot get a list of keys
     public static UpdatingTimer: number = 300;
     public static liveStateChanges: boolean = false;
+    public static storeMetadata: boolean = false;
+    public static storeNodeData: boolean = false;
 
 
     // to register call with both parameters. to remove a listener call with callback=undefined
     public static navigating: boolean = false; // if i'm changing page, i stop rendering to prevent meaningless errors.
-    static debug: boolean = false;
-    static uniqueNames: boolean = true;
+    public static debug: boolean = false;
+    public static uniqueNames: boolean = true;
+    public static safeMode: boolean = false; // if off, it skips some try-catch for easier debug. search and consider merging with local variables "canthrow" or similar
     static clickedOutside(currentTarget0: Element|Any<Event>, callback: undefined | ((e: Element, evt: JQuery.ClickEvent) => void)) {
         if (!currentTarget0) return;
         let currentTarget: Element = (currentTarget0 as any)?.currentTarget || currentTarget0 as any;
@@ -438,7 +441,7 @@ export class U {
     }
     static async compressedState(dproject: DProject): Promise<string> {
         let id: Pointer<DProject> = dproject.id;
-        const state = {...store.getState()};
+        const state = {...DState.getState()};
         const idlookup: Record<Pointer, DPointerTargetable> = {};
         for (const [pointer, object] of Object.entries(state.idlookup) as [Pointer, DPointerTargetable][]) {
             if ((object as DGraphElement).isSelected) (object as DGraphElement).isSelected = {};
@@ -2240,6 +2243,9 @@ export class U {
         return U.deepReplace(o, replacer);
     }
 
+    static jsonCopy(obj: any): any {
+        return JSON.parse(JSON.stringify(obj));
+    }
     static deepCopy(obj: any, circularReferenceValue?: any | ((obj_alreadymet: GObject)=>any)): any {
         return U.deepReplace(obj, undefined, circularReferenceValue);
     }
@@ -2885,7 +2891,7 @@ export class U {
         for (let [key, entry] of new URLSearchParams(search).entries()) ret[key] = entry;
         return ret;
     }
-    public static getProjectID_URL(): Pointer<DProject> | null { return U.getHashParam('id') as any; }
+    public static getProjectID_URL(): Pointer<DProject> { return U.getHashParam('id') as any; }
     public static getHashParam(arg_name: string): string | null {
         let search = window.location.hash;
         let _index = search.indexOf('?');
@@ -3177,6 +3183,19 @@ export class U {
                 return String(value);
         }
     return "";
+    }
+
+    static debugSimulateSlow() {
+        let count: number = (window as any).debugslow || 0;
+        for (let i = 0; i < count; i++) {
+            let s = DState.getState();
+            if (!s) return;
+            let s2 = {};
+            let delta1 = (window as any).Uobj.objectDelta(s2, s);
+            let delta2 = (window as any).Uobj.objectDelta(s, s2);
+            (window as any).Uobj.applyObjectDelta(s, delta2, s2);
+            (window as any).Uobj.applyObjectDelta(s2, delta1, s);
+        }
     }
 }
 export type ThrottleState = {timerID: null|number, decay: number, initialDelay:number, currentDelay:number, minDelay: number,
@@ -3759,7 +3778,7 @@ export class Keystrokes {
             // console.log('keydown', {key: e.key, selector, e, curr, ct:e.currentTarget});
             switch (e.key) {
                 case Keystrokes.escape:
-                    if (store.getState()?.isEdgePending?.source) SetRootFieldAction.new('isEdgePending', { user: '',  source: '' });
+                    if (DState.getState()?.isEdgePending?.source) SetRootFieldAction.new('isEdgePending', { user: '',  source: '' });
                     break;
                 // if those are the last key pressed is not an event, it is still typing.
                 case 'Control': case 'Shift': case 'Alt': return;

@@ -84,7 +84,7 @@ class builder {
         let d = l.__raw;
         let multiselectArr = d.dependencies;
         let multiselectValue: {value: string, label: string}[] = [];
-        let state = store.getState();
+        let state = DState.getState();
         let validoptionsarr = Selectors.getAll(DModel, undefined, state, true, false) as DModel[];
         let multiselectOptions: {value: string, label: string}[] = validoptionsarr.map(c => {
             let opt = {value:c.id, label: c.name};

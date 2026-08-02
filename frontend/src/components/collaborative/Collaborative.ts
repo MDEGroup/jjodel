@@ -143,7 +143,7 @@ export class Collaborative {
         fire(ca, session);/*
         if (this.firstReceive) {
             this.firstReceive = false;
-            let s = store.getState();
+            let s = DState.getState();
             // this one is only sent to collaborators.
             let action = SetRootFieldAction.create("idlookup."+DUser.current, DUser.getUser(), "", true);
             this.send(action);

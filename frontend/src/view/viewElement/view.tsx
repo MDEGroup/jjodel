@@ -608,7 +608,7 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
             if (isNode) {
                 TRANSACTION('delete node.grid', ()=>{
                     SetFieldAction.new(c.data, 'grid', undefined, '', false);
-                    let arr = store.getState().NODES_RECOMPILE_grid;
+                    let arr = DState.getState().NODES_RECOMPILE_grid;
                     arr = [...arr];
                     for (let l of (c.proxyObject as LGraph).allSubVertexes) arr.push(l?.id)
                     // NB: direct assignment instead of += if faulty but more efficient. but is not so important if some grid updates are skipped/overwritten
@@ -660,14 +660,14 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
         TRANSACTION('Update grid', ()=> {
             SetFieldAction.new(c.data, 'grid', gval as any, '+=', false);
             if (isNode) {
-                let arr = store.getState().NODES_RECOMPILE_grid;
+                let arr = DState.getState().NODES_RECOMPILE_grid;
                 arr = [...arr];
                 for (let l of (c.proxyObject as LGraph).allSubVertexes) arr.push(l?.id)
                 // NB: direct assignment instead of += if faulty but more efficient. but is not so important if some grid updates are skipped/overwritten
                 SetRootFieldAction.new("NODES_RECOMPILE_grid", arr, '');
             } else {
                 // NB: VIEWS_RECOMPILE_grid was deprecated on birth because from view in reducer i cannot query the state to get nodes. so i need to do it here.
-                let arr = store.getState().NODES_RECOMPILE_grid;
+                let arr = DState.getState().NODES_RECOMPILE_grid;
                 arr = [...arr];
                 let graphs = LViewElement.prototype.get_nodes.apply(LViewElement.singleton, [c]);
                 for (let l of graphs) {
@@ -965,7 +965,7 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
         let arr: Pointer<DViewElement>[] = Object.keys(c.data.subViews);
         let nextarr: Pointer<DViewElement>[] = [];
         let idmap: Dictionary<Pointer, DViewElement> = {};
-        let s: DState = store.getState();
+        let s: DState = DState.getState();
         let dview: DViewElement;
         while (arr.length) {
             for (let vid of arr) {
@@ -1287,7 +1287,7 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
     set_edgePointCoordMode(val: CoordinateMode, c: Context): boolean {
         TRANSACTION('change '+this.get_name(c)+'.edgePointCoordMode', ()=>{
             setTimeout(()=>{ // needs to be done after coordinatemode change is applied
-                let s: DState = store.getState();
+                let s: DState = DState.getState();
                 for (let nid in transientProperties.node) {
                     let tn = transientProperties.node[nid];
                     if (!tn || tn.mainView?.id !== c.data.id) continue;
@@ -1631,7 +1631,7 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
     /*protected*/ get_duplicate(c: Context): ((deep?: boolean, new_vp?: DuplicateVPChange) => LViewElement) {
         return (deep: boolean = false, new_vp0?: DuplicateVPChange) => {
             let lview: LViewElement = undefined as any;
-            let state: DState = store.getState();
+            let state: DState = DState.getState();
             TRANSACTION('duplicate ' + this.get_name(c), () => {
                 // let pvid: Pointer<DViewPoint> = c.data.viewpoint as Pointer<DViewPoint>;
                 let pvid: Pointer<DViewPoint> = c.data.father as Pointer<DViewPoint>;
@@ -1725,7 +1725,7 @@ export class LViewElement<Context extends LogicContext<DViewElement, LViewElemen
     }
 
     static updateDefaultView(v: DViewElement | DViewPoint, state?: DState): void {
-        let s = state || store.getState();
+        let s = state || DState.getState();
         let newView: DViewElement | DViewPoint = Defaults.defaultViewPointsMap[v.id]||Defaults.defaultViewsMap[v.id];
         if (!newView) return; // not a default view
         newView = {...newView} as DViewElement & DViewPoint;

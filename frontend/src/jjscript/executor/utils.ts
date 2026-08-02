@@ -12,7 +12,7 @@ import { DUser, L, LUser, LProject, LModel, store, LPointerTargetable, LModelEle
  */
 export function getActiveMetamodel(): LModel | null {
     try {
-        const state: DState & GObject = store.getState();
+        const state: DState & GObject = DState.getState();
         const selected = state._lastSelected?.modelElement;
 
         if (selected) {
@@ -38,7 +38,7 @@ export function getProject(context: ExecutionContext): LProject | null {
     try {
         // Try to get from context projectId
         if (context.projectId) {
-            const state = store.getState();
+            const state = DState.getState();
             const idlookup = (state as any).idlookup || {};
             const projectData = idlookup[context.projectId];
             if (projectData) {

@@ -57,7 +57,7 @@ export function Jodie(): JSX.Element {
     const project = useMemo(()=> user.project, []);
     const userName = useMemo(() => `${user.name || ''} ${user.surname || ''}`.trim(), []);
     const activeVersion = useMemo(() => AI.getActiveVersion(activeProvider), [activeProvider]);
-    const state = store.getState();
+    const state = DState.getState();
 
     // Get current project context for AI
     const projectContext = useMemo((): string | undefined => {
@@ -94,7 +94,7 @@ export function Jodie(): JSX.Element {
     // Initialize RAG and index project content
     useEffect(() => {
         const initializeAndIndex = async () => {
-            const newState = store.getState();
+            const newState = DState.getState();
             if (oldState === newState) return; // do not update while idle.
             oldState = newState;
             try {

@@ -2,6 +2,7 @@ import {
     Pointer,
     GObject,
     Dictionary, Defaults, transientProperties,
+    DState,
 } from '../joiner';
 
 import {
@@ -40,7 +41,7 @@ let ShortAttribETypes: typeof SAType = (window as any).ShortAttribETypes;
 export class DV {
     // refreshes languages for rapid debug
     public static refresh(){
-        let s = store.getState();
+        let s = DState.getState();
         let newLanguages = DV.defaultLanguages();
         s.languages = newLanguages;
 
@@ -55,7 +56,7 @@ export class DV {
     }
 
     public static refreshViews(){
-        let s = store.getState();
+        let s = DState.getState();
 
         for (let ptr in Defaults.defaultViewsMap) {
             let v = Defaults.defaultViewsMap[ptr];

@@ -1,7 +1,7 @@
 import {
     Dictionary,
     DModel,
-    DProject,
+    DProject, DState,
     GObject,
     LProject,
     Pointer,
@@ -129,7 +129,7 @@ class ProjectsApi {
     static async importFromText(content: string, name: string = '', date: number = Date.now()) {
         let project = JSON.parse(content) as DProject;
         project.isFavorite = false;
-        let state = store.getState();
+        let state = DState.getState();
         let resp_replace = 'Replace';
         let resp_dup = 'Duplicate';
         let response: string = resp_dup;
@@ -355,7 +355,7 @@ class Online {
 
     static async save(project: DProject): Promise<void> {
         project = {...project} as any;
-        if (!project.version) project.version = store.getState().version.n;
+        if (!project.version) project.version = DState.getState().version.n;
         if (!('_Id' in project)) (project as any)._Id = undefined;
         const updateProjectRequest = new UpdateProjectRequest(project);
         console.log('online save request: ', {updateProjectRequest});

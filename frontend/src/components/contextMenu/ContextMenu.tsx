@@ -1,7 +1,7 @@
 import React, {Dispatch, ReactElement, ReactNode, useRef} from 'react';
 import {connect} from 'react-redux';
 import {CtxMenuAllProps, CtxMenuPathSeparator} from '../forEndUser/ContextMenu';
-import type {
+import {
     DGraph,
     DGraphElement,
     Dictionary,
@@ -596,7 +596,7 @@ function ContextMenuComponentInner(props: AllProps) {
 
 /*************** keybindings events *****************/
 function getSelected(): {s: DState} & Partial<DState['_lastSelected']> {
-    let s: DState = store.getState();
+    let s: DState = DState.getState();
     return {s, ...(s._lastSelected || {})};
 }
 

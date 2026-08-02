@@ -156,7 +156,7 @@ everytime you put hands into a D-Object shape or valid values, you should docume
     public static autocorrect(s0?: DState, popupIfCorrect: boolean = false, canLoadAction: boolean = false): DState {
         let s: DState;
         if (s0) s = {...s0} as any;
-        else s = {...store.getState()} as any;
+        else s = {...DState.getState()} as any;
         if (!s0) s0 = {...s} as any;
 
         let validPtrs: typeof s.idlookup = {};
@@ -747,6 +747,6 @@ private static buildVersionSignature(): DState {
 
 
 
-    return store.getState();
+    return DState.getState();
 }
 */

@@ -17,7 +17,7 @@ import {
     LPointerTargetable,
     Pointer,
     store,
-    Selectors
+    Selectors, DState
 } from '../../joiner';
 import { EcoreService } from './EcoreService';
 
@@ -298,7 +298,7 @@ export class XMIService {
         }
         if (typeof value === 'string') {
             try {
-                const state = store.getState();
+                const state = DState.getState();
                 const d = state.idlookup[value];
                 if (d && d.className === 'DObject') {
                     return LPointerTargetable.fromD(d) as LObject;

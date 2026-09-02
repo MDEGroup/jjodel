@@ -704,6 +704,16 @@ export class LState<Context extends LogicContext<DState> = any, C extends Contex
     _lastSelected?: {modelElement?: LModelElement, node?: LGraphElement, view?: LViewElement};
     idlookup!:Dictionary<Pointer, DPointerTargetable>;
 
+    static debugScores(n: LGraphElement, l: LModelElement){
+        if (!n && l) n = l.node as any;
+        let scores = transientProperties.node[n.id].viewScores;
+        return Object.keys(scores).map((k)=>{let v = L.from(k) as any;
+                return {k, v:scores[k].finalScore,
+                js:v.jsCondition,
+                ocl:v.oclCondition,
+                scores, view:L.from(k), n}}).sort((e1, e2) => e2.v-e1.v);
+    }
+
     get__lastSelected(c: Context): this["_lastSelected"] {
         let ls = c.data._lastSelected;
         return ls && {modelElement: LState.wrap(ls.modelElement), node: LState.wrap(ls.node), view: LState.wrap(ls.view)}; }

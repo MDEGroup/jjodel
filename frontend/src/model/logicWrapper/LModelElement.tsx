@@ -372,7 +372,7 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
     }
 
     // used in Dummy.t2m()
-    protected _convertEcoreToJom_m2(ecore: GObject): GObject{
+    protected _convertEcoreToJom_m2(ecore: GObject, c: LogicContext, thiss: LModelElement): GObject{
         let ogKeys = Object.keys(ecore || {});
         // console.log('pre convert ecore', JSON.parse(JSON.stringify(ecore||{})));
         // remove xmi inline prefixs (@)
@@ -481,15 +481,26 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
 
                 // common to all features
                 case "egenerictype":
+                case "egenericsupertypes":
                     delete ecore[k];
                     if (!v) break;
-                    const model = this.get_model(c);
+                    const model = thiss.get_model(c);
+                    const serialized = GenericType.serializeGenericType(v, model, true);
+                    if (!serialized) break;
                     const classes = model.classes;
                     const enums = model.enums;
-                    const typedecls = (LOperation.singleton as LOperation).get_allTypeParameters.call(LOperation.singleton, c);
-                    ecore.genericType = GenericType.parse(GenericType.serializeECoreGenericType(v), classes, enums, typedecls); break;
-                case "egenericsupertypes":
-                case "etype":                   transformV = (v)=>U.solveEcoreType(v); string("type");   break;
+                    const typedecls = model.allTypeDeclarations;
+                    ecore.genericType = GenericType.parse(serialized, classes, enums, typedecls);
+                    break;
+/* eg: {
+    "@eClassifier": "#//Repository",
+    "eTypeArguments": {
+        "@eClassifier": "ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+    }
+}*/
+
+                    break;
+                case "etype":                   transformV = (v)=>{ console.log("solveetype", v); return U.solveEcoreType(v);}; string("type");   break;
                 case "lowerbound":              number("lowerBound"); break;
                 case "upperbound":              number("upperBound"); break;
                 case "containment":             bool("containment"); break;
@@ -580,6 +591,108 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
         return fullname;
     }
 
+    // ancestors: [LModel, ...Array<LObject | LValue>];
+    ancestors!: [...Array<LPointerTargetable>, LModel | LGraph];
+    __info_of__ancestors: Info = {type: "[...Array<LObject | LValue>, LModel]", txt: "Collection of containers of the current element." +
+            "\nStarting from the closest, going upward to the root and the model itself." };
+    set_ancestors(v: never, c: Context): true { return this.cannotSet("LObject.ancestors"); }
+
+    // order is from recent to oldest (element -> ... -> root -> model)
+    get_ancestors(c: Context, includeCurrent = false): this["ancestors"] {
+        let a: any[] = [];
+        let current = this.get_father(c);
+        if (includeCurrent) a.push(c.proxyObject);
+        let map: Dictionary<Pointer, LModelElement> = {[c.data.id]: c.proxyObject};
+        outer: while (current) {
+            let cid = current.id;
+            if (map[cid]) {
+                Log.ee("found loop in m1 get ancestors", {c, map, current});
+                return a as any;
+            }
+            map[cid] = current;
+            a.push(current);
+            const cname = current.className;
+            switch (cname) {
+                case "DUser": case "DModel": case "DGraph": case "DViewPoint": case "DProject":
+                    break outer;
+                default: break;
+            }
+            current = current.parent as any;
+        }
+        return a as this["ancestors"];
+    }
+
+    public ecorePointer(): string { return this.cannotCall("ecorePointer"); }
+    protected get_ecorePointer(c: Context): string { return this.get_getEcorePointer(c)(); }
+    // opposite function to resolve ecore pointers is: LValue.resolveReference()
+    protected get_getEcorePointer(c: Context): (roots?: LObject[]) => string {
+        return (roots0?: LObject[], canUseAnchor: boolean = true, anchorPrefix = "#") => {
+            const roots: LObject[] = roots0 || this.get_model(c).roots;
+            let s: string[] = [];
+            let ancestors = this.get_ancestors(c, true); // for # selector
+            let anchor: string = '';
+            if (canUseAnchor) {
+                anchor = this.get_eid(c);
+                // find closest parent object with a ecoreID
+                for (let i = 0; i < ancestors.length; i++) {
+                    let a = ancestors[i] as LObject;
+                    // if (a.className !== 'DObject') continue;
+                    let eid = a.eid;
+                    if (!eid) continue;
+                    anchor = eid;
+                    ancestors.splice(0, i+1);
+                    break;
+                }
+                //if (anchor) return anchorPrefix + anchor;
+            }
+            if (ancestors[ancestors.length - 1]?.className === "DModel") ancestors.pop();
+            ancestors = ancestors.reverse() as any;
+            // build positional selector starting from root or anchor
+            if (anchor) s.push(anchorPrefix + anchor);
+            console.log({ancestors, aid: ancestors.map(e=>e?.id), roots, rid:roots.map(r=>r?.id)});
+            let first = true;
+
+            for (let i = 0; i < ancestors.length; i++) {
+                let a: LValue = ancestors[i] as any;
+                // if (a?.id === c.data.id) break; // end loop, reached the target.
+                let cname = a.className;
+                // model -> skip: i handle the root object which comes at next iteration.
+                if (cname === "DModel") { Log.exDevv("found model in getEcorePointer. should be filtered out", {ancestors, a, i, c}); continue; }
+                if (first && !anchor) {
+                    if (cname !== "DObject") { Log.exDevv("found invalid first ancestor in getEcorePointer.", {ancestors, a, i, c}); return null as any; }
+                    first = false; // don't use i === 0, dvalue and dmodel might be filtered if they are [0]
+                    let obj: LObject = a as any; // only first elem can be a lmodel or obj having a #ecoreid
+                    // todo: if root can be omitted, how do i make a positional /@ ref to root? is it an empty "//@" ?
+                    // special case, if you are pointing the only root is just "/"
+                    let index = roots.findIndex( root => root.id === obj.id);
+                    if (index === -1) {
+                        Log.exDevv("get_ecorePointer first element is not a model root", {roots, obj, ancestors, thiss:c.data, model:this.get_model(c)});
+                        return null as any;
+                    }
+                    if (index === 0) { s.push("/"); }
+                    else s.push("/"+index+"");
+                    /* syntax for /@m2classnameroot.1/@featurename... should be wrong.
+                    let meta = obj.instanceof;
+                    let name = meta?.name || "shapeless";
+                    name = name[0].toLowerCase() + name.substring(1); // ecore/xmi convention
+                    s.push(name);*/
+                    continue;
+                }
+                if (cname !== 'DValue') continue;
+                let next: LObject | DObject = ancestors[i+1] as LObject;// || c.data;
+                if (!next) break;
+                let index = a.values.findIndex(e => (e as any)?.id === next.id);
+                console.log("getecorepointsr " + i, {index, a, an: a.name, av: a.__raw.values, i, nid: next?.id,
+                    ancestors:ancestors.map(a=>a?.__raw), c, next});
+                s.push(a.name + (index === 0 ? "" : "." + index));
+            }
+            return s.join("/@");
+            /*let prefix: string;
+            if (anchor) prefix = "/#" + anchor;
+            else prefix = "/"
+            return prefix + (s.length > 1 ? "/@" : "") + s.join("/@");*/
+        };
+    }
 
     protected _autofix_name(val: string, context: Context): string {
         // NB: NON fare autofix di univocità nome tra i children o qualsiasi cosa dipendente dal contesto, questo potrebbe essere valido in alcuni modelli e invalido in altri e modificare un oggetto condiviso.
@@ -648,32 +761,42 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
     get_shallowOwnEcore(c: Context): GObject { return this.generateEcoreJson_impl(c, {}, false, false); }
     get_shallowCrossEcore(c: Context): GObject { return this.generateEcoreJson_impl(c, {}, false, true); }
 
-    static generateEcoreJson_impl(c: LogicContext<LModelElement>, o: GObject){
-        if (!U.storeNodeData && !U.storeMetadata) return;
-        let annotations = o.annotations = (o.annotations || []);
-        let singleton_a = (window as any).LAnnotation.singleton;
-        const l: LModelElement = c.proxyObject;
-        let d: DAnnotation = {source: LAnnotation.metadataSource, details: {}};
-        
-        d.details.id = c.data.id;
-        if (U.storeNodeData) {
-            d.details.node = JSON.stringify(l.nodes.map(n=>n.forAnnotations()));
-        }
-        if (U.storeMetadata) {
-            d.details.state = JSON.stringify(l.__raw._state);
-        }
-        annotations.push(
-            singleton_a.generateEcoreJson_impl.call(singleton_a, new LogicContext(d, null as any))
-        );
+    static generateEcoreJson_impl(c: LogicContext<any>, o: GObject, loopDetectionObj: Dictionary<Pointer, DModelElement>,
+                                  deep: boolean, crossRef: boolean, metadata: boolean = false, thiss: LModelElement){
+        if (Array.isArray(o)) return;// todo: problem: how to approach LValue serialization which is an array and cannot contain id, state, node metadata?
 
+        // if (loopDetectionObj[c.data.id]) return; checked in parent function
+
+        const annotations = o.annotations = (o.annotations || []);
+        if (metadata) {
+            const singleton_a = (window as any).LAnnotation.singleton;
+            const l: LModelElement = c.proxyObject as LModelElement;
+            let d: Partial<DAnnotation> = {source: LAnnotation.metadataSource, details: {}};
+            d.details!.id = c.data.id;
+            d.details!.node = JSON.stringify(l.nodes.map(n=> n.forAnnotations()));
+            let str = JSON.stringify(l.__raw._state);
+            // todo regexp to match all deep pointers, filter those who are crossrefs?
+            d.details!.state = str;
+            annotations.push(
+                singleton_a.generateEcoreJson_impl.call(singleton_a, new LogicContext(d, null as any))
+            );
+        }
+        if (!deep) return;
+        for (let a of (thiss).get_annotations(c)) {
+            annotations.push(
+                a.generateEcoreJson(loopDetectionObj)
+            );
+        }
     }
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj?: Dictionary<Pointer, DModelElement>, deep: boolean = true, crossRef: boolean = true): Json {
+
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj?: Dictionary<Pointer, DModelElement>,
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         return this.cannotCall("generateEcoreJson_impl");
     }
-    public generateEcoreJson(loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep?: boolean, crossRef?: boolean): GObject { return this.cannotCall('generateEcoreJson'); }
+    public generateEcoreJson(loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep?: boolean, crossRef?: boolean, metadata: boolean = false): GObject { return this.cannotCall('generateEcoreJson'); }
     private get_generateEcoreJson(context: Context): (...p:Parameters<this['generateEcoreJson']>) => Json {
-        return (loopDetectionObj?: Dictionary<Pointer, DModelElement>, deep: boolean = true, crossRef: boolean = true) => (
-            this.generateEcoreJson_impl(context, loopDetectionObj, deep, crossRef)
+        return (loopDetectionObj?: Dictionary<Pointer, DModelElement>, deep: boolean = true, crossRef: boolean = true, metadata: boolean = false) => (
+            this.generateEcoreJson_impl(context, loopDetectionObj, deep, crossRef, metadata)
         )
     }
 
@@ -900,6 +1023,8 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
             SetFieldAction.new(c.data, 'father', val, '', true);
             let oldCollection = oldD ? LPointerTargetable.getCollection(c.data.className, oldD.className) : '';
             let newCollection = LPointerTargetable.getCollection(c.data.className, newD.className);
+
+            console.log("0x1 set subelements father", {id:c.data.id, oldCollection, newCollection, d:c.data, val});
             if (oldD && Array.isArray((oldD)[oldCollection])) SetFieldAction.new(oldD, oldCollection as any, val, '-=', true);
             if (newD && Array.isArray((newD)[newCollection])) SetFieldAction.new(newD, newCollection as any, val, '+=', true);
         }, old, val);
@@ -1309,10 +1434,12 @@ export class LAnnotation<Context extends LogicContext<DAnnotation> = any, D exte
     get_rawContents(c: Context): this["rawContents"] { return this.get_contents(c); }
     set_rawContents(v: Pack<LModelElement>, c: Context): boolean { return this.set_contents(v, c); }
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         EcoreParser.write(json, ECoreAnnotation.source, c.data.source);
         // EcoreParser.write(json, ECoreAnnotation.references, context.proxyObject.referencesStr);
         // keep sub-elements last
@@ -1406,13 +1533,13 @@ RuntimeAccessibleClass.set_extend(LModelElement, LAnnotation);
 export class LAnnotationDetail<Context extends LogicContext<DAnnotationDetail> = any> extends LModelElement { // todo
     father!: LAnnotation;
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {'eAnnotationDetail':'todo'};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         // keep sub-elements last
-        // if (c.data.name !== null) EcoreParser.write(json, ECoreDetail.key, c.data.name);
-        // if (c.data.value !== null) EcoreParser.write(json, ECoreDetail.value, c.data.value);
         return json;
     }
 
@@ -1749,7 +1876,7 @@ class LTypedElement<Context extends LogicContext<DTypedElement> = any> extends L
     }
 
     protected get_typeName(c: Context): string {
-        return c.data.genericType ? GenericType.serializeJOM(c.data.genericType) : this.get_type(c)?.name || "shapeless";
+        return c.data.genericType ? GenericType.serializeGenericType(c.data.genericType, this.get_model(c), false) : this.get_type(c)?.name || "shapeless";
     }
 
     protected get_type(c: Context): this["type"] {
@@ -2199,10 +2326,12 @@ export class LPackage<Context extends LogicContext<DPackage> = any, C extends Co
     }
 
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const model: GObject = {};
+        LModelElement.generateEcoreJson_impl(c, model, loopDetectionObj, deep, crossRef, metadata, this);
         const d = c.data;
         let classarr = deep ? this.get_classes(c).map(c => c.generateEcoreJson(loopDetectionObj, deep, crossRef)) : [];
         let enumarr = deep ? this.get_enumerators(c).map(e => e.generateEcoreJson(loopDetectionObj, deep, crossRef)) : [];
@@ -2725,10 +2854,12 @@ export class LOperation<Context extends LogicContext<DOperation, LOperation> = a
     defaultValueLiteral!: string;
     __isLOperation!: boolean; // to avoid duck typing mistaking it for LStructuralFeature
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         let params = deep ? c.proxyObject.parameters.map( par => par.generateEcoreJson(loopDetectionObj, deep, crossRef)) : [];
         EcoreParser.write(json, ECoreOperation.namee, c.proxyObject.name);
         EcoreParser.write(json, ECoreOperation.eType, c.proxyObject.type.typeEcoreString);
@@ -2751,7 +2882,7 @@ export class LOperation<Context extends LogicContext<DOperation, LOperation> = a
                 let de: D = le.__raw as D;
 
                 de.genericType = c.data.genericType ? U.deepCopy(c.data.genericType) : c.data.genericType;
-                de.typeParameters = c.data.typeParameters ? U.deepCopy(c.data.typeParameters) : c.data.typeParameters;
+                de.typeParameters = c.proxyObject.typeParameters.map(lchild => lchild.duplicate(deep).id);
                 de.lowerBound = c.data.lowerBound;
                 de.upperBound = c.data.upperBound;
                 de.ordered = c.data.ordered;
@@ -2774,17 +2905,26 @@ export class LOperation<Context extends LogicContext<DOperation, LOperation> = a
     protected get_addParameter(context: Context): this["addParameter"] {
         return (name?: DParameter["name"], type?: DParameter["type"]) => LPointerTargetable.fromD(DParameter.new(name, type, context.data.id, true)); }
 
-    public addTypeDeclaration(name?: DTypeDeclaration["name"]): LTypeDeclaration { return this.cannotCall("addTypeDeclaration"); }
-    protected get_addTypeDeclaration(c: Context): this["addTypeDeclaration"] {
-        return (name?: DTypeDeclaration["name"]) => LPointerTargetable.fromD(DTypeDeclaration.new2({name, father:c.data.id}, (d) => {}, true));
-    }
-
-
     // generic types
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
     __info_of__genericType = GenericType.desc_feature;
+
+    public addTypeDeclaration(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration { return this.cannotCall("addTypeDeclaration"); }
+    protected get_addTypeDeclaration(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+
+    @Alias ("addTypeDeclaration") public addTypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addTypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+    @Alias ("addTypeDeclaration") public addETypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addETypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+
 
     typeParameters!: NamedArr<LTypeDeclaration>;
     __info_of__typeParameters: Info = GenericType.descTypeParameters;
@@ -2999,10 +3139,12 @@ export class LParameter<Context extends LogicContext<DParameter> = any, C extend
     get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         const l = c.proxyObject;
         const d = c.data;
         EcoreParser.write(json, ECoreOperation.lowerBound, '' + d.lowerBound);
@@ -3201,12 +3343,12 @@ export class LClass<D extends DClass = DClass, Context extends LogicContext<DCla
     __info_of__allTypeParameters: Info = GenericType.descAllTypeParameters;
     set_allTypeParameters(v: DClass["typeParameters"], c: LogicContext<DClass | DOperation>): boolean { return this.cannotSet("allTypeParameters"); }
     get_allTypeParameters(c: LogicContext<DClass | DOperation>): this["typeParameters"] {
-        let params = this.get_typeParameters(c);
+        let params = U.arrayMergeInPlace( this.get_model(c).typeParameters, this.get_typeParameters(c));
         if (c.data.className === "DOperation") {
             // @ts-ignore protected method
             params.push( ...(LOperation.singleton.get_class.call(LOperation.singleton, c) as LClass)?.allTypeParameters || []);
         }
-        return params;
+        return params as this["typeParameters"];
     }
 
     @Alias("allTypeParameters") allETypeParameters!: NamedArr<LTypeDeclaration>;
@@ -3660,10 +3802,12 @@ export class LClass<D extends DClass = DClass, Context extends LogicContext<DCla
         return U.arrayMergeInPlace<any>(this.get_ownChildren(context), this.get_inheritedChildren(context));
     }
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: GObject = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         const d = c.data;
         const l = c.proxyObject;
         const attributes = deep ? l.attributes.map(a => a.generateEcoreJson(loopDetectionObj, deep, crossRef)) : [];
@@ -3699,7 +3843,7 @@ export class LClass<D extends DClass = DClass, Context extends LogicContext<DCla
                 we.defaultValue = c.data.defaultValue;
                 we.extends = c.data.extends;
                 we.genericSuperTypes = c.data.genericSuperTypes ? U.deepCopy(c.data.genericSuperTypes) : c.data.genericSuperTypes;
-                we.typeParameters = c.data.typeParameters ? U.deepCopy(c.data.typeParameters) : c.data.typeParameters;
+                we.typeParameters = c.proxyObject.typeParameters.map(lchild => lchild.duplicate(deep).id);
 
                 if (deep) {
                     we.annotations = c.proxyObject.annotations.map(lchild => lchild.duplicate(deep).id);
@@ -3764,9 +3908,31 @@ export class LClass<D extends DClass = DClass, Context extends LogicContext<DCla
         return (name?: DOperation["name"], type?: DOperation["type"]) => LPointerTargetable.fromD(DOperation.new(name, type, [], c.data.id, true));
     }
 
-    public addTypeDeclaration(name?: DTypeDeclaration["name"]): LTypeDeclaration { return this.cannotCall("addTypeDeclaration"); }
-    protected get_addTypeDeclaration(c: Context): this["addTypeDeclaration"] {
-        return (name?: DTypeDeclaration["name"]) => LPointerTargetable.fromD(DTypeDeclaration.new2({name, father:c.data.id}, (d) => {}, true));
+    public addTypeDeclaration(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration { return this.cannotCall("addTypeDeclaration"); }
+    get_addTypeDeclaration(c: Context): this["addTypeDeclaration"] {
+        return (obj0: Partial<DTypeDeclaration> | DTypeDeclaration["name"] = "T"): LTypeDeclaration => {
+            let obj: Partial<DTypeDeclaration> = obj0 as any || {};
+            let name: string = '';
+            if (typeof obj === "string") {
+                name = obj;
+            }
+            else if (typeof obj === "object"){
+                name = obj?.name || ""; // leave fallback blank. constructor can handle automatic naming if missing here.
+            }// else return null as any;
+            return LPointerTargetable.fromD(DTypeDeclaration.new2({...obj, name, father:c.data.id} as any, (d) => {
+                if (!obj || typeof obj !== "object") return;
+                for (let k in obj) { (d as any)[k] = (obj as any)[k]; }
+            }, true));
+        }
+    }
+
+    @Alias ("addTypeDeclaration") public addTypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addTypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+    @Alias ("addTypeDeclaration") public addETypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addETypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
     }
 
 
@@ -4475,21 +4641,7 @@ export class LTypeDeclaration<D extends DTypeDeclaration = DTypeDeclaration, Con
     protected get_father(c: Context): LTypeDeclaration["father"] { return super.get_father(c) as any; }
     protected get_toString(c: Context): () => string { return () => this._toString(c); }
     protected _toString(c: Context): string {
-        let def = this.get_defaultType(c);
-        let upper = this.get_upper(c);
-        let lower = this.get_lower(c);
-        let direction: string = this.get_direction(c);
-        let name = this.get_name(c);
-        if (direction === "inout" || !direction) direction = "";
-        else direction += " ";
-        if (!name && !def && !upper.length && !lower.length) return "";
-
-        let extendsStr = upper.map(e=>GenericType.serializeJOM(e)).filter(e=>!!e).join("&");
-        let superStr = lower.map(e=>GenericType.serializeJOM(e)).filter(e=>!!e).join("&");
-        console.log("serialize tp", {upper, umap:upper.map(e=>GenericType.serializeJOM(e)), lower, lmap: lower.map(e=>GenericType.serializeJOM(e))})
-        if (superStr) superStr = " super " + superStr;
-        if (extendsStr) extendsStr = " extends "+extendsStr;
-        return `${direction}${name}${extendsStr}${superStr}`;
+        return GenericType.serializeTypeDeclarationJOM(c.proxyObject, true);
     }
 
     public parse(s: string): this { throw this.wrongAccessMessage("parse"); }
@@ -4912,30 +5064,32 @@ export class LReference<Context extends LogicContext<DReference> = any, C extend
 
 
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
-        const model: GObject = {};
+        const json: GObject = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         const d = c.data;
         const l = c.proxyObject;
-        model[ECoreReference.xsitype] = 'ecore:EReference';
-        model[ECoreReference.eType] = l.type.typeEcoreString;
-        model[ECoreReference.namee] = d.name;
+        json[ECoreReference.xsitype] = 'ecore:EReference';
+        json[ECoreReference.eType] = l.type.typeEcoreString;
+        json[ECoreReference.namee] = d.name;
 
-        if (U.isNumber(d.lowerBound)) EcoreParser.write(model, ECoreReference.lowerbound, '' + d.lowerBound, "0");
-        if (U.isNumber(d.upperBound)) EcoreParser.write(model, ECoreReference.upperbound, '' + d.upperBound, "1");
-        if (U.isBool(d.changeable)) EcoreParser.write(model, ECoreReference.changeable, '' + d.changeable, "true");
-        if (U.isBool(d.derived)) EcoreParser.write(model, ECoreReference.derived, '' + d.derived, "false");
-        if (U.isBool(d.transient)) EcoreParser.write(model, ECoreReference.transient, '' + d.transient, "false");
-        if (U.isBool(d.volatile)) EcoreParser.write(model, ECoreReference.volatile, '' + d.volatile, "false");
-        if (U.isBool(d.unsettable)) EcoreParser.write(model, ECoreReference.unsettable, '' + d.unsettable, "false");
-        if (U.isBool(d.resolveProxies)) EcoreParser.write(model, ECoreReference.resolveProxies, '' + d.resolveProxies, "true");
-        if (d.opposite) EcoreParser.write(model, ECoreReference.eopposite, '' + d.opposite, "null");
+        if (U.isNumber(d.lowerBound)) EcoreParser.write(json, ECoreReference.lowerbound, '' + d.lowerBound, "0");
+        if (U.isNumber(d.upperBound)) EcoreParser.write(json, ECoreReference.upperbound, '' + d.upperBound, "1");
+        if (U.isBool(d.changeable)) EcoreParser.write(json, ECoreReference.changeable, '' + d.changeable, "true");
+        if (U.isBool(d.derived)) EcoreParser.write(json, ECoreReference.derived, '' + d.derived, "false");
+        if (U.isBool(d.transient)) EcoreParser.write(json, ECoreReference.transient, '' + d.transient, "false");
+        if (U.isBool(d.volatile)) EcoreParser.write(json, ECoreReference.volatile, '' + d.volatile, "false");
+        if (U.isBool(d.unsettable)) EcoreParser.write(json, ECoreReference.unsettable, '' + d.unsettable, "false");
+        if (U.isBool(d.resolveProxies)) EcoreParser.write(json, ECoreReference.resolveProxies, '' + d.resolveProxies, "true");
+        if (d.opposite) EcoreParser.write(json, ECoreReference.eopposite, '' + d.opposite, "null");
 
         let cont = d.aggregation || d.composition;
-        if (cont != null) { model[ECoreReference.containment] = cont; }
-        if (d.container != null) { model[ECoreReference.container] = d.container; }
-        return model; }
+        if (cont != null) { json[ECoreReference.containment] = cont; }
+        if (d.container != null) { json[ECoreReference.container] = d.container; }
+        return json; }
 
     public duplicate(deep: boolean = true): this {
         return this.cannotCall( ((this.constructor as typeof RuntimeAccessibleClass).cname || this.constructor.name) + "duplicate()"); }
@@ -5224,22 +5378,24 @@ export class LAttribute <Context extends LogicContext<DAttribute> = any, C exten
     get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
-        const model = {};
+        const json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         const d = c.data;
         const l = c.proxyObject;
-        EcoreParser.write(model, ECoreAttribute.xsitype, 'ecore:EAttribute');
-        EcoreParser.write(model, ECoreAttribute.eType, l.type.typeEcoreString);
-        EcoreParser.write(model, ECoreAttribute.namee, d.name);
-        if (U.isNumber(d.lowerBound)) EcoreParser.write(model, ECoreAttribute.lowerbound, '' + d.lowerBound, "0");
-        if (U.isNumber(d.upperBound)) EcoreParser.write(model, ECoreAttribute.upperbound, '' + d.upperBound, "1");
-        if (U.isBool(d.changeable)) EcoreParser.write(model, ECoreAttribute.changeable, '' + d.changeable, "true");
-        if (U.isBool(d.derived)) EcoreParser.write(model, ECoreAttribute.derived, '' + d.derived, "false");
-        if (U.isBool(d.transient)) EcoreParser.write(model, ECoreAttribute.transient, '' + d.transient, "false");
-        if (U.isBool(d.volatile)) EcoreParser.write(model, ECoreAttribute.volatile, '' + d.volatile, "false");
-        return model;
+        EcoreParser.write(json, ECoreAttribute.xsitype, 'ecore:EAttribute');
+        EcoreParser.write(json, ECoreAttribute.eType, l.type.typeEcoreString);
+        EcoreParser.write(json, ECoreAttribute.namee, d.name);
+        if (U.isNumber(d.lowerBound)) EcoreParser.write(json, ECoreAttribute.lowerbound, '' + d.lowerBound, "0");
+        if (U.isNumber(d.upperBound)) EcoreParser.write(json, ECoreAttribute.upperbound, '' + d.upperBound, "1");
+        if (U.isBool(d.changeable)) EcoreParser.write(json, ECoreAttribute.changeable, '' + d.changeable, "true");
+        if (U.isBool(d.derived)) EcoreParser.write(json, ECoreAttribute.derived, '' + d.derived, "false");
+        if (U.isBool(d.transient)) EcoreParser.write(json, ECoreAttribute.transient, '' + d.transient, "false");
+        if (U.isBool(d.volatile)) EcoreParser.write(json, ECoreAttribute.volatile, '' + d.volatile, "false");
+        return json;
     }
 
 
@@ -5415,10 +5571,12 @@ export class LEnumLiteral<Context extends LogicContext<DEnumLiteral> = any, C ex
     ordinal!: this["value"];
     literal!: string;
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         const d = c.data;
         json[ECoreLiteral.value] = d.value;
         json[ECoreLiteral.literal] = d.literal;
@@ -5576,10 +5734,12 @@ export class LEnumerator<Context extends LogicContext<DEnumerator> = any, C exte
     literals!: Dictionary<string, LEnumLiteral> & LEnumLiteral[];
     ordinals!: LEnumLiteral[]; // literal array ordered by ordinal number
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         let d = c.data;
         const literals = deep ? c.proxyObject.literals.map(l => l.generateEcoreJson(loopDetectionObj, deep, crossRef)) : [];
         json[ECoreEnum.xsitype] = 'ecore:EEnum';
@@ -5729,6 +5889,7 @@ export class DModel extends DNamedElement { // DNamedElement
     instanceof?: Pointer<DModel>;
     instances!: Pointer<DModelElement>[];
     dependencies!: Pointer<DModel>[];
+    typeParameters!: Pointer<DTypeDeclaration>[];
 
     public static new(name?: DNamedElement["name"], instanceoff?: DModel["instanceof"], isMetamodel?: DModel["isMetamodel"], persist: boolean = true): DModel {
         let dmodels: DModel[] = Selectors.getAll(DModel, undefined, undefined, true, false);
@@ -5889,11 +6050,12 @@ export class LModel<Context extends LogicContext<DModel> = any, C extends Contex
     suggestedEdges!: {extend: EdgeStarter[], reference:EdgeStarter[], packageDependencies: EdgeStarter[]}; //, model: EdgeStarter[], package:EdgeStarter[], class:EdgeStarter[]};
     __info_of__suggestedEdges: Info = Info.suggestedEdges;
 
-
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: GObject = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
 
         let packages: Json[] = [];
         let isM2 = c.data.isMetamodel;
@@ -6379,7 +6541,8 @@ instanceof === undefined or missing  --> auto-detect and assign the type
         return true;
     }
 
-    public duplicate(deep: boolean = true): this { throw new Error("Model.duplicate(): use export/import ecore instead."); }
+    public duplicate(deep: boolean = true): this { return this.cannotCall("duplicate"); }
+    protected get_duplicate(deep: boolean = true): this { throw new Error("Model.duplicate(): use export/import ecore instead."); }
 
     set_instanceof(val: Pack1<this["instanceof"]>, c: Context): boolean {
         let ptr = Pointers.from<DNamedElement>(val as any);// as (undefined | Pointer<DNamedElement>);
@@ -6472,6 +6635,60 @@ instanceof === undefined or missing  --> auto-detect and assign the type
         return true;
     }
 
+    public addTypeDeclaration(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration { return this.cannotCall("addTypeDeclaration"); }
+    protected get_addTypeDeclaration(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+    @Alias ("addTypeDeclaration") public addTypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addTypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+    @Alias ("addTypeDeclaration") public addETypeParameter(obj?: Partial<DTypeDeclaration> | DTypeDeclaration["name"]): LTypeDeclaration | null { return this.cannotCall("addTypeDeclaration"); }
+    @Alias ("addTypeDeclaration") protected get_addETypeParameter(c: Context): this["addTypeDeclaration"] {
+        return LClass.singleton.get_addTypeDeclaration.call(LClass.singleton, c);
+    }
+
+    typeParameters!: NamedArr<LTypeDeclaration>;
+    __info_of__typeParameters: Info = GenericType.descTypeParameters;
+
+    get_typeParameters(c: LogicContext<DClass | DOperation>): this["typeParameters"] {
+        return LClass.singleton.get_typeParameters.call(LClass.singleton, c);
+    }
+    set_typeParameters(v: DOperation["typeParameters"], c: LogicContext<DClass | DOperation>) {
+        return LClass.singleton.set_typeParameters.call(LClass.singleton, v, c);
+    }
+    /*get_addTypeParameter(c: Context) { return LClassifier.singleton.get_addTypeParameter(c); }
+    get_removeTypeParameter(c: Context) { return LClassifier.singleton.get_removeTypeParameter(c); }*/
+
+    @Alias("typeParameters") eTypeParameters!: this["typeParameters"];
+    @Alias __info_of__eTypeParameters: Info = {type: "TypeParameters[]", txt: "Alias for this.typeParameters"};
+    @Alias get_eTypeParameters(c: LogicContext<DClass | DOperation>): this["typeParameters"] { return this.get_typeParameters(c) }
+    @Alias set_eTypeParameters(v: DClass["typeParameters"], c: LogicContext<DClass | DOperation>): boolean { return this.set_typeParameters(v, c); }
+
+    @Alias("typeParameters") typeDeclarations!: this["typeParameters"];
+    @Alias __info_of__typeDeclarations: Info = {type: "TypeParameters[]", txt: "Alias for this.typeParameters"};
+    @Alias get_typeDeclarations(c: LogicContext<DClass | DOperation>): this["typeParameters"] { return this.get_typeParameters(c) }
+    @Alias set_typeDeclarations(v: DClass["typeParameters"], c: LogicContext<DClass | DOperation>): boolean { return this.set_typeParameters(v, c); }
+
+    allTypeParameters!: NamedArr<LTypeDeclaration>;
+    __info_of__allTypeParameters: Info = GenericType.descAllTypeParameters;
+    set_allTypeParameters(v: never, c: LogicContext<DClass | DOperation>): this["allTypeParameters"] { return this.cannotSet("allTypeParameters"); }
+    get_allTypeParameters(c: LogicContext<DClass | DOperation>): this["allTypeParameters"] {
+        return LClass.singleton.get_allTypeParameters.call(LClass.singleton, c);
+    }
+    @Alias("allTypeParameters") allETypeParameters!: NamedArr<LTypeDeclaration>;
+    @Alias __info_of__allETypeParameters: Info = GenericType.descAllTypeParameters;
+    @Alias set_allETypeParameters(v: never, c: LogicContext<DClass | DOperation>): this["allTypeParameters"] { return this.cannotSet("allTypeParameters"); }
+    @Alias get_allETypeParameters(c: LogicContext<DClass | DOperation>): this["allTypeParameters"] {
+        return LClass.singleton.get_allTypeParameters.call(LClass.singleton, c);
+    }
+    @Alias("allTypeParameters") allTypeDeclarations!: NamedArr<LTypeDeclaration>;
+    @Alias __info_of__allTypeDeclarations: Info = GenericType.descAllTypeParameters;
+    @Alias set_allTypeDeclarations(v: never, c: LogicContext<DClass | DOperation>): this["allTypeParameters"] { return this.cannotSet("allTypeParameters"); }
+    @Alias get_allTypeDeclarations(c: LogicContext<DClass | DOperation>): this["allTypeParameters"] {
+        return LClass.singleton.get_allTypeParameters.call(LClass.singleton, c);
+    }
+    /*********                                           M1 stuff                                               **********/
     protected get_crossRoots(context: Context): this["roots"] { return this.get_roots(context, true); }
     protected get_roots(context: Context, includeCross: boolean = false): this["roots"] {
         return this.get_objects(context, includeCross);//.filter( o => o.isRoot);
@@ -7118,9 +7335,11 @@ export class LObject<Context extends LogicContext<DObject> = any, C extends Cont
 
     // protected get_fromlclass<T extends keyof (LClass)>(meta: LClass, key: T): LClass[T] { return meta[key]; }
     protected get_model(context: Context): LModelElement["model"] {
-        let l: LValue | LObject | LModel | LAnnotation | LModelElement = context.proxyObject;
+        return super.get_model(context);
+        /*let l: LValue | LObject | LModel | LAnnotation | LModelElement = context.proxyObject;
         while (l && l.className !== DModel.cname) l = l.father;
-        return l as LModel; }
+        return l as LModel;*/
+    }
     // protected set_name(val: string, context: Context): boolean { return this.cannotSet("name"); }
     protected set_namespace(val: string, context: Context): boolean { return this.cannotSet("namespace"); }
     // protected get_namespace(context: Context): LClass["namespace"] { return context.proxyObject.instanceof.namespace; }
@@ -7208,11 +7427,13 @@ export class LObject<Context extends LogicContext<DObject> = any, C extends Cont
     }
 
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         let asEcoreRoot = (c.proxyObject.isRoot);
         const json: GObject = {};
+        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         if (asEcoreRoot) {
             console.log("generate object ecore", {c, asEcoreRoot, json});
             const lc = c.proxyObject.instanceof;
@@ -7333,104 +7554,7 @@ export class LObject<Context extends LogicContext<DObject> = any, C extends Cont
         return this.get_children(context);
         // return context.data.features.map((feature) => { return LPointerTargetable.from(feature) });
     }
-    // ancestors: [LModel, ...Array<LObject | LValue>];
-    ancestors!: [...Array<LObject | LValue>, LModel];
-    __info_of__ancestors: Info = {type: "[...Array<LObject | LValue>, LModel]", txt: "Collection of containers of the current element." +
-            "\nStarting from the closest, going upward to the root and the model itself." };
-    set_ancestors(v: never, c: Context): true { return this.cannotSet("LObject.ancestors"); }
 
-    // order is from recent to oldest (element -> ... -> root -> model)
-    get_ancestors(c: Context): this["ancestors"] {
-        let a: any[] = [];
-        let current = this.get_father(c);
-        let map: Dictionary<Pointer, LModelElement> = {[c.data.id]: c.proxyObject};
-        while (current) {
-            let cid = current.id;
-            if (map[cid]) {
-                Log.ee("found loop in m1 get ancestors", {c, map, current});
-                return a as any;
-            }
-            map[cid] = current;
-            a.push(current);
-            if (current.className === "DModel") break;
-            current = current.parent as any;
-        }
-        return a as this["ancestors"];
-    }
-
-    public ecorePointer(): string { return this.cannotCall("ecorePointer"); }
-    protected get_ecorePointer(c: Context): string { return this.get_getEcorePointer(c)(); }
-    // opposite function to resolve ecore pointers is: LValue.resolveReference()
-    protected get_getEcorePointer(c: Context): (roots?: LObject[]) => string {
-        return (roots0?: LObject[], canUseAnchor: boolean = true, anchorPrefix = "#") => {
-            const roots: LObject[] = roots0 || this.get_model(c).roots;
-            let s: string[] = [];
-            let ancestors = this.get_ancestors(c); // for # selector
-            let anchor: string = '';
-
-            if (canUseAnchor) {
-                let thiseid = this.get_eid(c);
-                if (thiseid) return anchorPrefix + thiseid;
-                // find closest parent object with a ecoreID
-                if (false as any) for (let i = 0; i < ancestors.length; i++) {
-                    let a = ancestors[i] as LObject;
-                    if (a.className !== 'DObject') continue;
-                    let eid = a.eid;
-                    if (!eid) continue;
-                    anchor = eid;
-                    ancestors.splice(i, ancestors.length);
-                    break;
-                }
-            }
-            if (ancestors[ancestors.length - 1]?.className === "DModel") ancestors.pop();
-            ancestors = ancestors.reverse() as any;
-            ancestors.push(c.proxyObject);
-            // build positional selector starting from root or anchor
-            if (anchor) s.push(anchorPrefix + anchor);
-            console.log({ancestors, aid: ancestors.map(e=>e?.id), roots, rid:roots.map(r=>r?.id)});
-            let first = true;
-
-            for (let i = 0; i < ancestors.length; i++) {
-                let a: LValue = ancestors[i] as any;
-                // if (a?.id === c.data.id) break; // end loop, reached the target.
-                let cname = a.className;
-                // model -> skip: i handle the root object which comes at next iteration.
-                if (cname === "DModel") { Log.exDevv("found model in getEcorePointer. should be filtered out", {ancestors, a, i, c}); continue; }
-                if (first && !anchor) {
-                    if (cname !== "DObject") { Log.exDevv("found invalid first ancestor in getEcorePointer.", {ancestors, a, i, c}); return null as any; }
-                    first = false; // don't use i === 0, dvalue and dmodel might be filtered if they are [0]
-                    let obj: LObject = a as any; // only first elem can be a lmodel or obj having a #ecoreid
-                    // todo: if root can be omitted, how do i make a positional /@ ref to root? is it an empty "//@" ?
-                    // special case, if you are pointing the only root is just "/"
-                    let index = roots.findIndex( root => root.id === obj.id);
-                    if (index === -1) {
-                        Log.exDevv("get_ecorePointer first element is not a model root", {roots, obj, ancestors, thiss:c.data, model:this.get_model(c)});
-                        return null as any;
-                    }
-                    if (index === 0) { s.push("/"); }
-                    else s.push("/"+index+"");
-                    /* syntax for /@m2classnameroot.1/@featurename... should be wrong.
-                    let meta = obj.instanceof;
-                    let name = meta?.name || "shapeless";
-                    name = name[0].toLowerCase() + name.substring(1); // ecore/xmi convention
-                    s.push(name);*/
-                    continue;
-                }
-                if (cname !== 'DValue') continue;
-                let next: LObject | DObject = ancestors[i+1] as LObject;// || c.data;
-                if (!next) break;
-                let index = a.values.findIndex(e => (e as any)?.id === next.id);
-                console.log("getecorepointsr " + i, {index, a, an: a.name, av: a.__raw.values, i, nid: next?.id,
-                    ancestors:ancestors.map(a=>a?.__raw), c, next});
-                s.push(a.name + (index === 0 ? "" : "." + index));
-            }
-            return s.join("/@");
-            /*let prefix: string;
-            if (anchor) prefix = "/#" + anchor;
-            else prefix = "/"
-            return prefix + (s.length > 1 ? "/@" : "") + s.join("/@");*/
-        };
-    }
 
 }
 RuntimeAccessibleClass.set_extend(DNamedElement, DObject);
@@ -7646,6 +7770,9 @@ export class LValue<Context extends LogicContext<DValue> = any, C extends Contex
         if (query === "/") return model.roots[0];
         if (query[0] === "/") query = query.substring(1);
         let segments = query.split("/");
+        if (segments[0] === "ecore:EDataType http:") {
+            return LModelElement.fromPointer(U.solveEcoreType(query, true)) as any || null;
+        }
         let current: LObject | null = null;
         console.log("resolvereference 000", {segments, current});
         // is this even valid? i'm expecting #identifier instead of #//identifier
@@ -9070,9 +9197,12 @@ export class LValue<Context extends LogicContext<DValue> = any, C extends Contex
         return U.toNamedArray(arr);
     }
 
-    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {}, deep: boolean = true, crossRef: boolean = true): Json {
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
+        let ret: any = [];
+        LModelElement.generateEcoreJson_impl(c, ret, loopDetectionObj, deep, crossRef, metadata, this);
         let values: any[] = deep ? this.get_values(c, true, false, true,
             false, false, false, undefined, "literal_str") : [];
         delete (values as any)["type"];
@@ -9080,7 +9210,6 @@ export class LValue<Context extends LogicContext<DValue> = any, C extends Contex
         if (!crossRef && mid) {
             values = values.filter(v=> v !== undefined && v !== null).filter(v => L.isL(v) ? ((v as LModelElement)?.model?.id === mid) : true);
         }
-        let ret: any = [];
         the_loop: for (let v of values) {
             let l: LObject | LEnumLiteral = v as any;
             if (!l?.__isProxy) { ret.push(l); continue; }

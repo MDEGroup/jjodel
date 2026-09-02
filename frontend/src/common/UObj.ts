@@ -157,6 +157,7 @@ export class Uobj {
             else return unchanged;
         }
         if (tn === 'object' && to === 'object' && Object.keys(ret).length === 0) return unchanged;
+        ret.__jjObjDiffDeltaRoot = true;
         return ret as Partial<T>;
     }
 
@@ -219,6 +220,7 @@ export class Uobj {
             }
         }
 
+        delete statelevel.__jjObjDiffDeltaRoot;
         if (location.hostname !== "localhost" && (!window as any).assertdebug) asserteq = undefined;
         if (asserteq) {
             let _as = stringify(asserteq);
@@ -229,6 +231,15 @@ export class Uobj {
         }
         return statelevel;
     }
+
+    /*static fixDeltaArrays<T extends GObject | null | undefined>(delta: T, force): T {
+        if (!delta || typeof delta !== "object") return delta;
+        if (!delta.__jjObjDiffIsArr) return delta;
+        let ret: any[] = [];
+        nope because it contains also length, but i cannot trim the delta array, i have to trim the original. so use applyDelta
+        for (let k in delta) { (ret as any)[k] = delta[k]; }
+        return undefined;
+    }*/
 }
 
 Uobj.cname = 'Uobj';

@@ -385,6 +385,7 @@ export class U {
     }
 
     static solveEcoreType(v: string, asPointer: boolean = false): string {
+        if (!v) return v;
         if (v.indexOf('#//') === 0) v = v.substring(3);
         switch (v) {
             case ShortAttribETypes.EVoid:     v = 'Void';    break;
@@ -1962,6 +1963,20 @@ export class U {
         while ((allowDecimalDot || allowDecimalComma) && (tmpindex = ret.indexOf(".")) !== ret.lastIndexOf(".")) ret = ret.substring(tmpindex+1) // ret.indexOf(.)
         // if (ret[0]==="-" && (ret[1]==="," || ret[1]===".")) ret = "-0."+ret.substring(2); automatically done bu js.    +"-.5" = -0.5
         return +ret;
+    }
+
+    // determines if the object is closer to type A or B, by passing the keys of A and B as string arrays, or an object assumed to have all the keys of A, B.
+    // @return: A and B as % of keys in o being in A or B, arr === keysA or keysB according to the highest similarity.
+    static closerTo(o: GObject, keysA: GObject | string[], keysB: GObject | string[]): {A: number, B: number, closestKeys: GObject | string[]}{
+        const useSetA = Array.isArray(keysA);
+        const useSetB = Array.isArray(keysB);
+        const aKeys = useSetA ? new Set<string>(['a1', 'a2', 'a3']) : null;
+        const bKeys = useSetB ? new Set<string>(['b1', 'b2', 'b3']) : null;
+        const total = Object.keys(o).length || 1; // avoid div by zero
+        const keys = Object.keys(o);
+        const A = keys.filter(k => aKeys ? aKeys.has(k) : k in keysA).length / total;
+        const B = keys.filter(k => bKeys ? bKeys.has(k) : k in keysA).length / total;
+        return {A, B, closestKeys: B > A ? keysB : keysA};
     }
 
     // faster than jquery, underscore and many native methods checked https://stackoverflow.com/a/59787784

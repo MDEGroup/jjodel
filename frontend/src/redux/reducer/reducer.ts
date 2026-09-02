@@ -237,22 +237,33 @@ function deepCopyButOnlyFollowingPath(oldStateDoNotModify: DState, action: Parse
                 if (inCollabNode) return false; // abort for collab nodes
                 continue; // silently skip for local duplicates
             }
+
+            if ((action as any).debug) console.log("0x1 action", U.jsonCopy({isObjectMerge, isArrayAppend, oldValue, newVal, current}));
             if (isObjectMerge) {
                 if (typeof newVal === 'string') { let tmp: any = {}; tmp[newVal] = true; newVal = tmp; }
                 oldValue = {...current[key]};
-                current[key] = {...current[key]};
 
-                for (let subkey in newVal) {
-                    // console.warn("object merge", {current, key, subkey, newVal, old:current[key][subkey], new:newVal[subkey]});
-                    if (current[key][subkey] === newVal[subkey]) continue;
-                    let subval = current[key][subkey] = newVal[subkey];
-                    gotChanged = true;
-                    if (action.isPointer && Pointers.isPointer(subkey)) newRoot = PointedBy.add(subkey as Pointer, action, newRoot, "+=");
-                    if (action.isPointer && Pointers.isPointer(subval)) newRoot = PointedBy.add(subval as Pointer, action, newRoot, "+=");
+                if (newVal.__jjObjDiffDeltaRoot) {
+                    if (!U.isEmptyObject(newVal)) {
+                        current[key] = Uobj.applyObjectDelta(current[key], newVal, false);
+                        gotChanged = true;
+                    }
+                }
+                else {
+                    current[key] = {...current[key]};
+                    for (let subkey in newVal) {
+                        // console.warn("object merge", {current, key, subkey, newVal, old:current[key][subkey], new:newVal[subkey]});
+                        if (current[key][subkey] === newVal[subkey]) continue;
+                        let subval = current[key][subkey] = newVal[subkey];
+                        gotChanged = true;
+                        if (action.isPointer && Pointers.isPointer(subkey)) newRoot = PointedBy.add(subkey as Pointer, action, newRoot, "+=");
+                        if (action.isPointer && Pointers.isPointer(subval)) newRoot = PointedBy.add(subval as Pointer, action, newRoot, "+=");
+                    }
                 }
                 if (action.isPointer && Pointers.isPointer(key)) newRoot = PointedBy.add(key as Pointer, action, newRoot, "+=");
             } else
             if (isObjectDifference) {
+                if (newVal.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
                 if (typeof newVal === 'string') newVal = {[newVal]: true};
                 oldValue = {...current[key]};
                 current[key] = {...current[key]};
@@ -267,6 +278,7 @@ function deepCopyButOnlyFollowingPath(oldStateDoNotModify: DState, action: Parse
                 if (action.isPointer && Pointers.isPointer(key)) newRoot = PointedBy.add(key as Pointer, action, newRoot, "-=");
             }
             else if (isArrayAppend) {
+                if (newVal.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
                 gotChanged = true;
                 if (allowFixingNullArr && !Array.isArray(current[key])) { current[key] = []; }
                 if (!Array.isArray(current[key])) break;

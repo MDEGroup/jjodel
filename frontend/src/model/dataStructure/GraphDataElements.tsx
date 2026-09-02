@@ -239,8 +239,9 @@ export class LGraphElement<Context extends LogicContext<DGraphElement> = any, C 
 
     toString(): string { return this.wrongAccessMessage("toString"); }
     get_toString(c: Context): ()=>string { return ()=>JSON.stringify(c.data); }
-    serializable(): string { return this.wrongAccessMessage("serializable"); }
-    get_serializable(c: Context): GObject {
+
+    forAnnotations(): string { return this.wrongAccessMessage("forAnnotations"); }
+    get_forAnotations(c: Context): GObject {
     //return  ()=>{
         let o: Partial<GObject<DGraphElement>> = c.data
         // delete o.view;
@@ -933,6 +934,7 @@ export class LGraphElement<Context extends LogicContext<DGraphElement> = any, C 
         let ptr: DGraphElement["father"] = Pointers.from(val) as any;
         TRANSACTION(this.get_name(c)+'.father', ()=> {
             SetFieldAction.new(c.data, 'father', ptr, undefined, true);
+            console.log("0x1 set subelements father2", {id:c.data.id, d:c.data, val});
             if (ptr) SetFieldAction.new(ptr as any, 'subElements+=', c.data.id);
         }, this.get_father(c).name, (L.fromPointer(ptr) as LGraphElement)?.name||'')
         return true; }

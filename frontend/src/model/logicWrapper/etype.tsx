@@ -4,7 +4,7 @@ import {
     GObject,
     LogicContext,
     Info, DPointerTargetable, DOperation, ShortAttribETypes, DModelElement, DtoL, LTypeDeclaration, DTypeDeclaration,
-    LOperation, NamedArr
+    LOperation, NamedArr, DModel, LPointerTargetable, LAnnotation, ECoreAnnotation, orArr
 } from "../../joiner";
 import {
     DClassifier, LClassifier, Pointers, U, L, LModel, LClass, DClass, LEnumerator,
@@ -12,6 +12,21 @@ import {
     DEnumerator, EcoreParser, LValue, AttribETypes, RuntimeAccessible, Uobj, TRANSACTION, SetFieldAction,
 } from "../../joiner";
 import {DictArr} from "../../joiner/types";
+
+const OPERATOR_MAP: Dictionary<string, keyof GenericType> = {
+    "&": "operandsAnd",
+    "|": "operandsOr",
+    "\\": "operandsDifference",
+    "~": "operandsComplement",
+    // ",": "operandsTuple",
+};
+const OPERATORS: { symbol: string; field: keyof GenericType }[] = [
+    // { symbol: ",",  field: "operandsTuple" },
+    { symbol: "|",  field: "operandsOr" },          // lowest precedence
+    { symbol: "&",  field: "operandsAnd" },
+    { symbol: "\\", field: "operandsDifference" },
+    { symbol: "~",  field: "operandsComplement" },   // highest precedence
+];
 
 // ------------------------------------------------------------------
 // Recursive descent parser
@@ -30,30 +45,64 @@ class GenericTypeParser {
 
     parseRef(): GenericType {
         this.skipWS();
-        const ref = this.parseIntersectionOrSingle();
+        const ref = this.parseOperatorOrSingle();
         this.skipWS();
         return ref;
     }
-    getPos(): number {
+    protected getPos(): number {
         return this.pos;
     }
 
     // Intersection: A & B & C  (only when not inside a wildcard bound)
-    private parseIntersectionOrSingle(): GenericType {
-        const first = this.parseArraySuffix();
-        this.skipWS();
-        if (this.peek() === "&") {
-            const operands: GenericType[] = [first];
-            while (this.peek() === "&") {
-                this.consume("&");
-                this.skipWS();
-                operands.push(this.parseArraySuffix());
-                this.skipWS();
-            }
-            return new GenericType("intersection", undefined, undefined, [], [], [], operands);
-        }
-        return first;
+
+// ------------------------------------------------------------------
+// Precedence parser — replaces parseIntersectionOrSingle entirely.
+// Call this wherever parseIntersectionOrSingle was called before.
+// ------------------------------------------------------------------
+
+// Entry point for all operator parsing with priority and parenthesis handling.
+    private parseOperatorOrSingle(): GenericType {
+        return this.parseAtPrecedence(0);
     }
+
+// Recursive precedence climbing.
+// level 0 = loosest (|), level OPERATORS.length = tightest (delegates to unary/primary)
+    private parseAtPrecedence(level: number): GenericType {
+        // beyond all operator levels — delegate to array suffix / primary
+        if (level >= OPERATORS.length) {
+            return this.parseArraySuffix();
+        }
+
+        const { symbol, field } = OPERATORS[level];
+
+        // parse left operand at the next tighter precedence level
+        const first = this.parseAtPrecedence(level + 1);
+        this.skipWS();
+
+        if (!this.input.startsWith(symbol, this.pos)) return first;
+
+        // collect all operands for this operator
+        const operands: GenericType[] = [first];
+        while (this.input.startsWith(symbol, this.pos)) {
+            this.consume(symbol);
+            this.skipWS();
+            // right operand is also parsed at the next tighter level
+            // giving left-associativity naturally
+            operands.push(this.parseAtPrecedence(level + 1));
+            this.skipWS();
+        }
+
+        const ret = new GenericType("operator");
+        (ret as any)[field] = operands;
+        return ret;
+    }
+
+// ------------------------------------------------------------------
+// parsePrimary — extend to handle parenthesis groups.
+// Parentheses reset precedence back to 0 inside the group,
+// allowing (A | B) & C to parse correctly.
+// ------------------------------------------------------------------
+
 
     // Array suffix:  T   →  T[]  or  T[][]  etc.
     private parseArraySuffix(): GenericType {
@@ -61,80 +110,86 @@ class GenericTypeParser {
         this.skipWS();
         while (this.input.startsWith("[]", this.pos)) {
             this.pos += 2;
-            ref = new GenericType("array", undefined, undefined, [], [], [], [], ref);
+            ref = new GenericType("array");
+            ref.operandsArray = ref;
             this.skipWS();
         }
         return ref;
     }
-
-    // Primary: wildcard | parenthesised | named (raw/parameterized/typeParam)
+    // Primary: wildcard | parenthesised | named (raw/parameterized)
     private parsePrimary(): GenericType {
         this.skipWS();
 
-        // Parenthesised group — used before [] in serialization e.g. (Map<K,V>)[]
+        // parenthesis group — resets to lowest precedence inside
         if (this.peek() === "(") {
             this.consume("(");
-            const inner = this.parseRef();
+            this.skipWS();
+            const inner = this.parseAtPrecedence(0);   // full precedence reset
             this.skipWS();
             this.consume(")");
             return inner;
         }
 
-        // Wildcard
+        // wildcard
         if (this.peek() === "?") {
             this.consume("?");
             this.skipWS();
             if (this.tryConsume("extends")) {
                 this.skipWS();
                 const bounds = this.parseBoundList();
-                return new GenericType("wildcard", undefined, undefined, [], bounds, []);
+                const ret = new GenericType("wildcard");
+                ret.upper = bounds;
+                return ret;
             }
             if (this.tryConsume("super")) {
                 this.skipWS();
                 const bounds = this.parseBoundList();
-                return new GenericType("wildcard", undefined, undefined, [], [], bounds);
+                const ret = new GenericType("wildcard");
+                ret.lower = bounds;
+                return ret;
             }
-            // todo: can a wildcard appear alone "?" ?
             return new GenericType("wildcard");
         }
 
-        // Named: identifier optionally followed by <...>
+        // named: raw, parameterized
         const name = this.parseIdentifier();
-        if (!name) throw new Error(`Unexpected token at pos ${this.pos}: "${this.input.slice(this.pos, this.pos + 10)}"`);
+        if (!name) throw new Error(
+            `Unexpected token at pos ${this.pos}: "${this.input.slice(this.pos, this.pos + 20)}"`
+        );
 
         this.skipWS();
+
         if (this.peek() === "<") {
             // Parameterized
             this.consume("<");
             const args: GenericType[] = [];
             this.skipWS();
             if (this.peek() !== ">") {
-                args.push(this.parseRef());
+                // type arguments use full precedence reset too
+                args.push(this.parseAtPrecedence(0));
                 this.skipWS();
                 while (this.peek() === ",") {
                     this.consume(",");
                     this.skipWS();
-                    args.push(this.parseRef());
+                    args.push(this.parseAtPrecedence(0));
                     this.skipWS();
                 }
             }
             this.consume(">");
             // eg: Shape<Geom2D>, List<?>
-            return new GenericType("parameterized", name, undefined, args);
+            const ret = new GenericType("parameterized");
+            ret.classifier = name;
+            ret.typeArgs = args;
+            return ret;
         }
-
-        // Heuristic: single uppercase letter (or common names) → typeParam, else raw
         let ltarget = this.classes[name] || this.enums[name] || this.typeDeclarations[name];
-        const isTypeParam = ltarget?.className === "DTypeDeclaration";
-        if (isTypeParam) {
-            // raw T, K, V ... same as "raw" but target is LTypeDelement
-            return new GenericType("typeParam", undefined, ltarget.id);
-        }
-        // eg: Shape, Map    same as "typeParam" but target is LClass
-        return new GenericType("raw", ltarget?.id || name);
+        // eg: Shape, Map, T (target is LClass or LTypeParam
+        const ret = new GenericType("raw");
+        ret.classifier = ltarget?.id || name;
+        return ret;
     }
 
-    // Parse a & b & c  — used for wildcard bounds (no nested intersection recursion)
+    // Parse a & b & c  — used for wildcard bounds (no nested operator recursion)
     private parseBoundList(): GenericType[] {
         const bounds: GenericType[] = [this.parseArraySuffix()];
         this.skipWS();
@@ -191,19 +246,71 @@ type String = DClassifier;
 
 export type GenericTypeName = string;
 export type TYPE =  Pointer<DClassifier> | Pointer<DTypeDeclaration>; // pointer or string like "T", because i can have stuff like K extends V
+
+
+export class TypeDeclaration {
+    id?: Pointer<DTypeDeclaration>
+    name!: string;
+    upper!: (GenericType | TYPE)[];
+    lower!: (GenericType | TYPE)[];
+    direction!: "in" | "out" | "inout"; // also called variance: Input (contravariant) or an Output (covariant).
+    defaultType?: GenericType | TYPE;
+    constructor() {
+        this.upper = [];
+        this.lower = [];
+        this.direction = "inout";
+        this.defaultType = undefined;
+        this.name = "T";
+    }
+}
 @RuntimeAccessible("GenericType")
 export class GenericType {
     static cname = "GenericType";
-    kind: "raw" | "parameterized" | "typeParam" | "wildcard" | "intersection" | "array" | "todo";
-    name?: GenericTypeName;
-    classifier?: TYPE;
-    typeArgs: GenericType[];
-    upper: (TYPE | GenericType)[];
-    lower: (TYPE | GenericType)[];
-    operands: GenericType[];
-    componentType?: GenericType;
+    kind: "raw" | "parameterized" | "wildcard" | "operator" | "array" | "todo";
+    // name?: GenericTypeName | Pointer<DTypeDeclaration>;
+    classifier?: Pointer<DClassifier> | Pointer<DTypeDeclaration> | GenericTypeName;
+    typeArgs?: GenericType[];
+    upper?: (Pointer<DClassifier> | Pointer<DTypeDeclaration> | GenericType)[];
+    lower?: (Pointer<DClassifier> | Pointer<DTypeDeclaration> | GenericType)[];
+    operandsOr?: GenericType[];
+    operandsAnd?: GenericType[];
+    operandsDifference?: GenericType[];
+    operandsComplement?: GenericType[];
+    operandsTuple?: GenericType[];
+    operandsArray?: GenericType;
+    // annotations?: LAnnotation; // removed because i cannot have GenericType contain L-elements
 
 
+    static test() {
+        const testt: Dictionary<string, Dictionary<string, Dictionary<string, (...a:any)=>any>>> = {
+            GenericType: {
+                serialize: {
+                    universal: GenericType.serializeGenericType, // string
+                    jodel: GenericType.serializeJOM, // string
+                    ecore: GenericType.serializeEcore, // string
+                },
+                parse: {
+                    universal: "cannot exist" as any,
+                    jodel: GenericType.parse, // GenericType (jom struct)
+                    ecore: GenericType.parseToEcore, // EGenericType (ecore struct)
+                }
+            },
+
+            typeParameters: {
+                serialize: {
+                    universal: GenericType.serializeTypeDeclaration, // string
+                    jodel: GenericType.serializeTypeDeclarationJOM, // string
+                    ecore: GenericType.serializeETypeParameter, // string
+                },
+                parse: {
+                    universal: "cannot exist" as any,
+                    "??": GenericType.parseDeclaration,
+                    jodel: null, jom setter?
+                    ecore: null, l.toecore??
+                }
+            }
+        }
+    }
 
     static desc_feature: Info = {type: ShortAttribETypes.EString, txt: "Mutually exclusive with this.type, it specified a parametrized type.\n" +
             "The type must be declared in the class definition, and referenced here by name (string). example:" +
@@ -226,14 +333,14 @@ export class GenericType {
     public static descTypeParameters: Info = {type: "TypeDeclaration[]", txt: "Type parameters attached to the classifier or function definition, like in HashMap<K, V>"}
     public static descAllTypeParameters: Info = Info.typeDeclarations;
 
-
-    static serializeETypeParameter(...a: Parameters<typeof serializeETypeParameter>): ReturnType<typeof serializeETypeParameter> {
+    private static serializeETypeParameter(...a: Parameters<typeof serializeETypeParameter>): ReturnType<typeof serializeETypeParameter> {
         return serializeETypeParameter(...a);
     }
 
-    static serializeECoreGenericType(...a: Parameters<typeof serializeECoreGenericType>): ReturnType<typeof serializeECoreGenericType> {
+    /*
+    private static serializeECoreGenericType(...a: Parameters<typeof serializeECoreGenericType>): ReturnType<typeof serializeECoreGenericType> {
         return serializeECoreGenericType(...a);
-    }
+    }*/
 
     // use lTypeDeclaration.toString instead
     static serializeJTypeParameter(arr: LTypeDeclaration[], m: LModel, asID: boolean = true ): string | null {return null as any; }
@@ -255,22 +362,34 @@ export class GenericType {
         return true;
     }
 
-    public static getter(v?: Partial<GenericType>): GenericType | undefined{
+    public static getter(v?: Partial<GenericType>, c: LogicContext<DModelElement>): GenericType | undefined{
+        if (typeof v === "string") {
+            const model = (c.proxyObject as LModelElement).model;
+            const classes = model.classes;
+            const enums = model.enums;
+            const typeDeclarations = model.allTypeDeclarations;
+            return GenericType.parse(v, classes, enums, typeDeclarations);
+        }
         if (!v || !v.kind || typeof v.kind !== "string") return undefined;
         let ret = new GenericType(v.kind);
-        ret.name = typeof v.name === "string" && v.name ? v.name : undefined;
+        // ret.name = typeof v.name === "string" && v.name ? v.name : undefined;
         ret.classifier = this.PointerOrName<DClass>(v.classifier);
         ret.upper = (v.upper || []).map<GenericType | TYPE>(e=> GenericType.PointerOrName(e, true) as any).filter(e=>!!e);
         ret.lower = (v.lower || []).map<GenericType | TYPE>(e=> GenericType.PointerOrName(e, true) as any).filter(e=>!!e);
-        ret.operands = (v.operands || []).map(e=> GenericType.getter(e)).filter(e=>!!e);
-        ret.typeArgs = (v.typeArgs || []).map(e=> GenericType.getter(e)).filter(e=>!!e);
-        ret.componentType = GenericType.getter(v.componentType);
+
+        ret.operandsTuple =      (v.operandsTuple      || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.operandsAnd =        (v.operandsAnd        || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.operandsOr =         (v.operandsOr         || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.operandsDifference = (v.operandsDifference || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.operandsComplement = (v.operandsComplement || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.typeArgs =           (v.typeArgs           || []).map(e=> GenericType.getter(e, c)).filter(e=>!!e);
+        ret.operandsArray = GenericType.getter(v.operandsArray, c);
         return ret;
     }
 
     public static setter(v: GenericType | undefined, c: LogicContext<any>, thiss: LModelElement): boolean {
-        v = GenericType.getter(v);
-        let old  = GenericType.getter(c.data.genericType);
+        v = GenericType.getter(v, c as LogicContext<DModelElement>);
+        let old = GenericType.getter(c.data.genericType, c as LogicContext<DModelElement>);
         let delta = old && v && Uobj.objectDelta(old, v, true, false);
         if (delta && Object.keys(delta).length === 0) return true;
         TRANSACTION((thiss as any).get_name(c)+".genericType", ()=> {
@@ -302,15 +421,55 @@ export class GenericType {
         return ret;
     }
 
-    public static setter_typeParameters(v: Pointer<DTypeDeclaration>[] | undefined, c: LogicContext<DClass | DOperation>, thiss: LClass | LOperation): boolean {
-        let old = c.data.typeParameters;
-        v = v ? Pointers.fromArr(v) : undefined;
+    // type declarations on operation.eTypeParameters and class.eTypeParameters
+    public static setter_typeParameters(v0: (Pointer<DTypeDeclaration> | TypeDeclaration)[] | undefined, c: LogicContext<DClass | DOperation | DModel>, thiss: LClass | LOperation | LModel): boolean {
+        let old = (c.data as DClass | DOperation | DModel).typeParameters;
+        console.log("0x1 set typeParameters", {v0, c, thiss});
+        if (typeof v0 === "string") return TypeDeclaration.parse(v0);
+        if (!v0 || typeof v0 !== "object" || U.isEmptyObject(v0)) v0 = [];
+        if (!Array.isArray(v0)) { v0 = [v0 as any]; }
+        // else v0 = Pointers.fromArr(v0);
+        // if (v0.length === 0) v0 = undefined;
+
+        const model = c.proxyObject.model;
+        const classes = model.classes;
+        const enums = model.enumerators;
+        const typeDecls = (c.proxyObject as LClass | LOperation | LModel).allTypeDeclarations; // not model.typeDeclarations, because it needs to get all typedecls in this element and his ancestors.
+        // let finalArr: Pointer<DTypeDeclaration>[] = [];
+        const finalArr: Pointer<DTypeDeclaration>[] = v0.map(v => {
+            let tv = typeof v;
+            if (tv !== "string" && tv !== "object") return null;
+
+            let ptr = Pointers.from(v as any as DPointerTargetable);
+            let serialized: string | null = null;
+            if (tv === "string") {
+                if (Pointers.isPointer(ptr)) { finalArr.push(ptr as Pointer<any>); return v; }
+                else serialized = v as string;
+            }
+            if (tv === "object") {
+                // if not P or D, it's a xmi/ecore/json structure.
+                const model = c.proxyObject.model;
+                serialized = GenericType.serializeETypeParameter([v as TypeDeclaration], model, true);
+            }
+            if (!serialized) return null;
+            let obj = GenericType.parseDeclaration(serialized, classes, enums, typeDecls);
+            if (!obj) return null as any;
+            return LPointerTargetable.fromD(DTypeDeclaration.new2({...obj, father:c.data.id} as any, (d) => {
+                if (!obj || typeof obj !== "object") return;
+                for (let k in obj) { (d as any)[k] = (obj as any)[k]; }
+            }, true));
+            // or already serialized version
+        }).filter(e=>!!e)
+
+
+        /*
         let delta = old && v?.length && Uobj.objectDelta(old, v, true, false);
         if (delta && Object.keys(delta).length === 0) return true;
+        // delta = Uobj.fixDeltaArrays(delta);
         TRANSACTION((thiss as any).get_name(c)+".typeParameters", ()=> {
             if (v) SetFieldAction.new(c.data, "typeParameters", delta as any, "{}", false);
             else SetFieldAction.new(c.data, "typeParameters", [], '', false);
-        }, delta ? delta : old, delta ? undefined : (old ? v : null))
+        }, delta ? delta : old, delta ? undefined : (old ? v : null))*/
         return true;
     }
 
@@ -330,21 +489,30 @@ export class GenericType {
 
     constructor(
         kind: GenericType["kind"],
+        setter?:(d: GenericType)=>void/*
         classifier?: TYPE,
-        name?: GenericTypeName,
         typeArgs?: GenericType[],
         upper?: GenericType["upper"], lower?: GenericType["lower"],
-        operands?: GenericType[],
-        componentType?: GenericType
+        operandsAnd?: GenericType[],
+        operandsArray?: GenericType,
+        operandsOr?: GenericType[],
+        operandsDifference?: GenericType[],
+        operandsComplement?: GenericType[],
+        operandsTuple?: GenericType[],*/
     ) {
         this.kind = kind;
+        if (setter) setter(this);
+        /*
         this.classifier = classifier;
-        this.name = name;
-        this.typeArgs = typeArgs ?? [];
-        this.upper = upper ?? [];
-        this.lower = lower ?? [];
-        this.operands = operands ?? [];
-        this.componentType = componentType;
+        this.typeArgs = typeArgs;
+        this.upper = upper;
+        this.lower = lower;
+        this.operandsAnd = operandsAnd;
+        this.operandsOr = operandsOr;
+        this.operandsDifference = operandsDifference;
+        this.operandsTuple = operandsTuple;
+        this.operandsComplement = operandsComplement;
+        this.operandsArray = operandsArray;*/
     }
 
     // ------------------------------------------------------------------
@@ -359,92 +527,232 @@ export class GenericType {
         }
         return defaultRet;
     }
-    static serializeTypeDeclaration(l: LTypeDeclaration): string { return l.toString(); }
+
+    static serializeTypeDeclarationJOM(l: LTypeDeclaration, asID = true): string {
+        let def = l.defaultType; // thiss.get_defaultType(c);
+        let upper = l.upper; // thiss.get_upper(c);
+        let lower = l.lower; // thiss.get_lower(c);
+        let direction: string = l.direction; // thiss.get_direction(c);
+        const m: LModel = l.model;
+        let name = l.name; // (thiss as any).get_name(c);
+        if (direction === "inout" || !direction) direction = "";
+        else direction += " ";
+        if (!name && !def && !upper.length && !lower.length) return "";
+
+        let extendsStr = upper.map(e=>GenericType.serializeJOM(e, m, asID)).filter(e=>!!e).join("&");
+        let superStr = lower.map(e=>GenericType.serializeJOM(e, m, asID)).filter(e=>!!e).join("&");
+        console.log("serialize tp", {upper, lower,
+            umap:upper.map(e=>GenericType.serializeJOM(e, m, asID)),
+            lmap: lower.map(e=>GenericType.serializeJOM(e, m, asID))
+        });
+        if (superStr) superStr = " super " + superStr;
+        if (extendsStr) extendsStr = " extends "+extendsStr;
+        return `${direction}${name}${extendsStr}${superStr}`;
+    }
+
+    static serializeTypeDeclaration(l: LTypeDeclaration, m?: LModel, asID = true): string {
+        const fallback: string = "";
+        if (l?.__isProxy) return l.toString();
+        if (l?.className === "DTypeDeclaration") return L.fromD(l as any)?.toString?.() || fallback;
+        if (Pointers.isPointer(l)) return L.fromPointer(l as any)?.toString?.() || fallback;
+        const tl = typeof l;
+        if (tl === "object") {
+            if (!m) { windoww.Log.eDevv("Cannot serialize ETypeParameter without a reference to the model."); return fallback; }
+            return serializeETypeParameter(l as any, m, asID) || fallback;
+        }
+        if (tl === "string") return l as any || fallback;
+        return fallback;
+    }
+
     // ------------------------------------------------------------------
     // SERIALIZE
     // Produces a human-readable string like:
-    //   raw:           "Shape"
+    //   raw:           "Shape", T
     //   parameterized: "Map<String, List<T>>"
-    //   typeParam:     "T"
     //   wildcard:      "?", "? extends Foo & Bar", "? super Baz"
-    //   intersection:  "A & B & C"
+    //   operator    :  "A & B & C"
     //   array:         "T[]", "List<T>[]"
     // ------------------------------------------------------------------
-    static serializeDict(o: Dictionary<TYPE, GenericType>): string {
-        return Object.values(o).map( e => GenericType.serializeJOM(e)).join(", ");
-    }
-
-    public static serializeEcore(type: EGenericType, m: LModel, asID = true){ return serializeECoreGenericType(type, m, asID); }
-    public static serializeJOM(o0: GenericType | TYPE | LClass): string {
-        let to = typeof o0;
+    public static serializeGenericType(gType: EGenericType | GenericType | TYPE |  LClass, m: LModel, asID = true): string {
+        let to = typeof gType;
         if (to === "string") {
-            if (Pointers.isPointer(o0)) return L.from(o0)?.name || "";
-            return o0 as any;
+            if (Pointers.isPointer(gType)) return L.from(gType)?.name || ""; // should never be possible, this is not a LTypeDeclaration
+            return gType as any;
         }
         if (to === "object") {
-            let cnamePrefix = (o0 as any)?.className?.[0];
-            if (cnamePrefix === "D" || cnamePrefix === "L") return L.from(o0 as LClass)?.name || "";
+            // return (gType as any).name ?? (gType as any).toString() ?? null;
+            let cnamePrefix = (gType as any)?.className?.[0];
+            if (cnamePrefix === "D") return L.from(gType as LClass)?.name || "";
         }
 
 
+        if (U.closerTo(gType, J_GTKeys, E_GTKeys).closestKeys = J_GTKeys) return GenericType.serializeJOM(gType as any, m, asID);
+        else return GenericType.serializeEcore(gType as any, m, asID);
+    }
+    private static serializeEcore(type: EGenericType, m: LModel, asID = true): string{ return serializeECoreGenericType(type, m, asID); }
+    private static serializeJOM(o0: GenericType | TYPE | LClass, m: LModel, asID = true): string {
+
+        function joinOperands(arr: GenericType[], operator: string, autoParenthesis: boolean = true) {
+            let types = arr.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e);
+            let s = types.join(operator);
+            if (!types.length) return "";
+            if (types.length === 1 || !autoParenthesis) { return s; }
+            else return "(" + s + ")";
+        }
+
         let o = o0 as GenericType;
+        o = normalizeEcoreKeys(o);
+
+        /*
+        field	        raw	        parameterized   wildcard	intersection	array
+        classifier	    �required	�required       ✗	        ✗	            ✗
+        typeArgs	    ✗	        �required       ✗	        ✗	            ✗
+        upper	        ✗	        ✗               �optional	✗	            ✗
+        lower	        ✗	        ✗               �optional	✗	            ✗
+        operands	    ✗	        ✗               ✗	        �required	    ✗
+        componentType   ✗          	✗	            ✗	        ✗	            �required
+
+        */
         switch (o.kind) {
+            default: // throw new Error(`Unknown GenericType kind: ${(o as any).kind}`);
+                let isDefault = !!o.kind;
+                console.log("serialize gt", {o, cl:o.classifier, args:o.typeArgs});
+                if (o.operandsArray) { // array mode
+                    const inner = GenericType.serializeJOM(o.operandsArray, m, asID);
+                    // Wrap parameterized/intersection in parens for clarity, e.g. (Map<K,V>)[]
+                    const needsParens = true; // o.operandsArray.kind === "parameterized" || o.operandsArray.kind === "intersection" || o.typeArgs?.length > 0;
+                    return needsParens ? `(${inner})[]` : `${inner}[]`;
+                }
+                // NB: mixed operators can be realized with nesting {operandsOr:[ a1, {operandsAND: [b1, b2]}]}  --> a1 | (b1 & b2)
+                if (o.operandsTuple?.length)  return "[" + joinOperands(o.operandsTuple,        ", ", false) + "]";
+                if (o.operandsOr?.length)           return joinOperands(o.operandsOr,           " | ", false);
+                if (o.operandsAnd?.length)          return joinOperands(o.operandsAnd,          " & ", false);
+                if (o.operandsDifference?.length)   return joinOperands(o.operandsDifference,   " \ ", false);
+                if (o.operandsComplement?.length)   return joinOperands(o.operandsComplement,   " ~ ", false);
+
+                o.classifier
+                let base: string;
+                let isWildcard: boolean = false;
+                if (!o.classifier) {
+                    if (!isDefault) throw new Error("parameterized GenericType missing classifier");
+                    isWildcard = true;
+                    base = "?";
+                } else base = GenericType.classifierName(o.classifier);
+                let bounds = "";
+
+                if (o.upper?.length) {
+                    const arr = o.upper.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e);
+                    if (arr.length) bounds += ` extends ${arr.join(" & ")}`;
+                }
+                if (o.lower?.length) {
+                    // Java only allows a single lower bound but we stay general
+                    const arr = o.lower.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e);
+                    if (arr.length) bounds += ` super ${arr.join(" & ")}`;
+                }
+
+                if (o.typeArgs?.length) {
+                    const args = o.typeArgs.map(e=> GenericType.serializeGenericType(e, m, asID)).join(", ");
+                    return `${base}<${args}>${bounds}`;
+                }
+                return base + bounds;
+            break;
             case "raw": {
                 if (!o.classifier) throw new Error("raw GenericType missing classifier");
                 return GenericType.classifierName(o.classifier);
             }
 
             case "parameterized": {
+                let isDefault = !!o.kind;
                 console.log("serialize gt", {o, cl:o.classifier, args:o.typeArgs});
                 if (!o.classifier) throw new Error("parameterized GenericType missing classifier");
                 const base = GenericType.classifierName(o.classifier);
-                if (o.typeArgs.length === 0) return base;
-                const args = o.typeArgs.map(GenericType.serializeJOM).join(", ");
-                return `${base}<${args}>`;
-            }
-
-            case "typeParam": {
-                if (!o.name) throw new Error("typeParam GenericType missing name");
-                return o.name;
+                if (o.typeArgs?.length) {
+                    const args = o.typeArgs.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e).join(", ");
+                    return `${base}<${args}>`;
+                }
+                return base;
             }
 
             case "wildcard": {
                 // upper and lower are mutually exclusive in practice
-                if (o.upper.length > 0) {
-                    const bounds = o.upper.map(GenericType.serializeJOM).join(" & ");
+                if (o.upper?.length) {
+                    const bounds = o.upper.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e).join(", ");
                     return `? extends ${bounds}`;
                 }
-                if (o.lower.length > 0) {
+                if (o.lower?.length) {
                     // Java only allows a single lower bound but we stay general
-                    const bounds = o.lower.map(GenericType.serializeJOM).join(" & ");
+                    const bounds = o.lower.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e).join(", ");
                     return `? super ${bounds}`;
                 }
                 return "?";
             }
 
-            case "intersection": {
-                if (o.operands.length === 0) throw new Error("intersection GenericType has no operands");
-                return o.operands.map(GenericType.serializeJOM).join(" & ");
+            case "operator": {
+                let collection: keyof GenericType;
+                if (o.operandsTuple?.length) {
+                    return "["+o.operandsTuple.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e).join(", ")+"]";
+                }
+
+                if (o.operandsAnd?.length) collection = "operandsAnd";
+                if (o.operandsOr?.length) collection = "operandsOr";
+                if (o.operandsComplement?.length) collection = "operandsComplement";
+                if (o.operandsDifference?.length) collection = "operandsDifference";
+                else collection = "" as any;
+
+                let arr: GenericType["operandsAnd"] = o[collection] as GenericType["operandsAnd"] || [];
+                let symbol = OPERATOR_MAP[collection];
+                if (arr.length === 0) windoww.Log.ee("GenericType operation("+collection+") has no operands", {arr, o});
+                return "("+arr.map(e=> GenericType.serializeGenericType(e, m, asID)).filter(e=>!!e).join(symbol)+")";
             }
 
             case "array": {
-                if (!o.componentType) throw new Error("array GenericType missing componentType");
-                const inner = GenericType.serializeJOM(o.componentType);
+                if (!o.operandsArray) throw new Error("array GenericType missing componentType");
+                const inner = GenericType.serializeJOM(o.operandsArray, m, asID);
                 // Wrap parameterized/intersection in parens for clarity, e.g. (Map<K,V>)[]
-                const needsParens = o.componentType.kind === "parameterized"
-                    || o.componentType.kind === "intersection";
+                const needsParens = o.operandsArray.kind === "parameterized" || o.operandsArray.kind === "operator";
                 return needsParens ? `(${inner})[]` : `${inner}[]`;
             }
-
-            default:
-                throw new Error(`Unknown GenericType kind: ${(o as any).kind}`);
         }
     }
 
-    // ------------------------------------------------------------------
-    // Parses the same format produced by serialize().
-    // Entry point: parse("Map<String, List<? extends Foo>>")
-    // ------------------------------------------------------------------
+    public static parseToEcore(s: string | GenericType,
+                               classes: NamedArr<LClass>,
+                               enums: NamedArr<LEnumerator>,
+                               typeDeclarations: NamedArr<(LTypeDeclaration | TypeDeclaration)>, asID = false): XmiGenericTypeJson{
+        let gt: GenericType;
+        if (typeof s === "string") gt = GenericType.parse(s, classes, enums, typeDeclarations);
+        else gt = s as any;
+        const ret = new XmiGenericTypeJson();
+        ret.ebounds         = gt.upper?.map(g=> GenericType.parseToEcore(g, classes, enums, typeDeclarations));
+        ret.etypearguments  = gt.typeArgs?.map(g=> GenericType.parseToEcore(g, classes, enums, typeDeclarations));
+        // block: set eTypeParameter or eClassifier (mutually exclusive
+        {
+            let l = L.fromPointer(gt.classifier) as LClass | LTypeDeclaration;
+            if (gt.classifier && !l) ret.etypeparameter = gt.classifier; // treating unknown target as a missing type declaration like K, V, T
+            else {
+                let val: string = l ? l.ecorePointer() : gt.classifier; // target's name or ecore-based pointer string
+                if (l.className === "LClass") { ret.eclassifier = val; }
+                else ret.etypeparameter = val;
+
+            }
+            if (Pointers.isPointer(ret.eclassifier) && !asID) {
+                ret.eclassifier = (L.fromPointer(ret.eclassifier) as LClass | LTypeDeclaration)?.name || "";
+            }
+
+        }
+        // ret.eannotations = gt.annotations.map((a: LAnnotation)=> a.eCore);
+
+        if (ret.ebounds?.length === 1) ret.ebounds = ret.ebounds[0];
+        if (ret.etypearguments?.length === 1) ret.etypearguments = ret.etypearguments[0];
+        // if (ret.eannotations?.length === 1) ret.eannotations = ret.eannotations[0];
+
+        if (!ret.eclassifier || !(ret.eclassifier as any).length) delete ret.eclassifier;
+        if (!ret.eannotations || !(ret.eannotations as any).length) delete ret.eannotations;
+        if (!ret.ebounds || !(ret.ebounds as any).length) delete ret.ebounds;
+        if (!ret.etypearguments || !(ret.etypearguments as any).length) delete ret.etypearguments;
+        return ret;
+    }
+    //  parse("Map<String, List<? extends Foo>>") --> JOM object
     public static parse(s: string,
                         classes: NamedArr<LClass>,
                         enums: NamedArr<LEnumerator>,
@@ -508,7 +816,7 @@ class TypeParamDeclParser {
         if (!this.typeDeclarations[ret.name]) {
             this.typeDeclarations.push(ret);
             this.typeDeclarations[ret.name] = ret;
-            // save old name so references can stioll point to it with old name?
+            // save old name so references can still point to it with old name?
             if (base && !this.typeDeclarations[base.name]) this.typeDeclarations[base.name] = ret;
         }
         this.skipWS();
@@ -609,7 +917,7 @@ class TypeParamDeclParser {
 | { kind: "parameterized"; classifier: TYPE; typeArgs: GenericType[] }
 // e.g. Map<String, List<T>>
 
-| { kind: "typeParam";  name: GenericTypeName }
+| { kind: "raw";  name: GenericTypeName }
 // e.g. T, K, V — reference to a declared type parameter
 
 | { kind: "wildcard";   upper: TYPE[]; lower: TYPE[] }* /
@@ -633,29 +941,32 @@ let type: any;
 
 
 // T                      simple generic
-let simpleT = new GenericType("typeParam", undefined, "T");
+let simpleT = new GenericType("raw");
+simpleT.classifier = "T";
 
 // List                         no type args — raw/non-generic use
-type = new GenericType("raw", "" as Pointer<List>); // raw keyword can be removed and replaced with "parameterized" with empty parameter array
+type = new GenericType("raw"); // raw keyword can be removed and replaced with "parameterized" with empty parameter array
 
 // List<T>                      simple parameterized
-let listType = new GenericType("parameterized", "" as Pointer<List>, undefined, [simpleT]);
+let listType = new GenericType("parameterized");
+listType.typeArgs = [simpleT];
 
 // Map<String, List<T>>         nested parameterized
-type = new GenericType("parameterized", "" as Pointer<MMAP>, undefined, [
-    new GenericType("typeParam", "" as Pointer<String>),
+type = new GenericType("parameterized");
+type.typeArgs = [
+    new GenericType("raw"),
     listType
-]);
+];
 
 // Map<K, List<T>>              nested parameterized 2
-type = new GenericType("parameterized", "" as Pointer<MMAP>, undefined, [
-    new GenericType("typeParam", undefined, "K"),
+type = new GenericType("parameterized");
+type.typeArgs = [
+    {...new GenericType("raw"), classifier: "K"},
     listType
-]);
+];
 // ? extends Foo        upper wildcard
-type = new GenericType("wildcard", undefined, undefined, undefined, [
-    listType
-]);
+type = new GenericType("wildcard");
+type.upper = [listType];
 
 
 
@@ -688,6 +999,8 @@ class ECoreGenericType {
 
     // A wildcard has neither eClassifier nor eTypeParameter
 }
+
+// removes XMI inline marker and transforms all keys to lowercase.
 function normalizeEcoreKeys<T extends GObject>(go: T, deep = true): T{
     go = {...go};
     for (let k0 in go) {
@@ -714,11 +1027,12 @@ function normalizeEcoreKeys<T extends GObject>(go: T, deep = true): T{
 // Raw JSON shapes produced by XMI parsing
 // ------------------------------------------------------------------
 
-interface XmiGenericTypeJson {
-    "eclassifier"?:   string;   // present for raw / parameterized / wildcard-bound
-    "etypeparameter"?: string;  // present for typeParam references
-    "etypearguments"?:  XmiGenericTypeJson | XmiGenericTypeJson[];
-    "ebounds"?:         XmiGenericTypeJson | XmiGenericTypeJson[];
+class XmiGenericTypeJson {
+    eannotations?:     orArr<ECoreAnnotation>;
+    "eclassifier"?:    string;  // present for raw / parameterized / wildcard-bound
+    "etypeparameter"?: string;  // present for typeParam references. mutually exclusive with eclassifier but same meaning for different target types
+    "etypearguments"?: orArr<XmiGenericTypeJson>;
+    "ebounds"?:        orArr<XmiGenericTypeJson>;
     // A wildcard has neither eClassifier nor eTypeParameter
 }
 
@@ -830,16 +1144,16 @@ export class TypeDeclaration {
 // ? type TypeFill = ETypeParameter;
 
 
-class EGenericType {
+class EGenericType { // todo: not ecore's structure, when i'm using this? use instead XmiGenericTypeJson
     elowerbound?: ELowerBound;
     eupperbound?: EUpperBound;
     etypearguments?: ETypeArgument[]; // containment, assign a value to a generic type, can only appear to fill slots in extending a egenericsupertype
     // non-containment:
-    erawtype!: string | Pointer<DClassifier>;
+    // erawtype!: string | Pointer<DClassifier>; // derived attribute, strips away all type arguments and returns the bare underlying classifier.
     eclassifier?: string | Pointer<DClassifier>; // mutually exclusive with etypeparameter
     // SINGLE type used for typing features with a generic type, like: class Tree<T>{ public node:T }
     // etypeparameter is mutually exclusive with eclassifier
-    etypeparameter?: Pointer<any/*ETypeParameter*/>; // actually a string, ecore style pointer to ETypeParameter!
+    etypeparameter?: Pointer<DTypeDeclaration | DClass> | string; // <Date> actually a string (name) or ecore style pointer to ETypeParameter. cannot have type parameter instantiations (etypearguments)
 }
 // public class Repository<T extends Number> extends AbstractData<T, String> { }
 //                         T = ETypeParameter declaration,
@@ -881,6 +1195,22 @@ function resolveClassifier(s: string, m: LModel): LClassifier | null{
     else return LValue.resolveReference(s, m) as any || null;
 }
 
+export function serializeETypeParameter_old(arr: ETypeParameter[], m: LModel, asID: boolean = true ): string | null {
+    const fallback = null;
+    arr = normalizeArray(arr);
+    if (!arr?.length) return fallback;
+    return arr.map((param) => {
+        let paramStr = param.name || fallback;
+
+        // Checks if the parameter has an upper bound (extends clause)
+        if (param.ebounds) {
+            const boundStr = normalizeArray(param.ebounds).map(b=>GenericType.serializeGenericType(b, m, asID) || fallback).join( " & ");
+            if (boundStr) paramStr += ` extends ${boundStr}`;
+        }
+        return paramStr;
+    }).join(", ")
+}
+
 function resolveClassifierName(s: string, m: LModel, asID: boolean = true): string | null {
     // as class eid
     let lc =  resolveClassifier(s, m);
@@ -892,30 +1222,80 @@ function resolveClassifierName(s: string, m: LModel, asID: boolean = true): stri
     return fragment.split("/").pop() || fallbackRet;
 }
 
-export function serializeETypeParameter(arr: ETypeParameter[], m: LModel, asID: boolean = true ): string | null {
+// used in GenericType.serializeETypeParameter
+function serializeETypeParameter(arr: (ETypeParameter | TypeDeclaration)[], m: LModel, asID: boolean = true): string | null {
     const fallback = null;
     arr = normalizeArray(arr);
     if (!arr?.length) return fallback;
-    return arr.map((param) => {
-        let paramStr = param.name || fallback;
 
-        // Check if the parameter has an upper bound (extends clause)
-        if (param.ebounds) {
-            const boundStr = normalizeArray(param.ebounds).map(b=>serializeECoreGenericType(b, m, asID) || fallback).join( " & ");
-            if (boundStr) paramStr += ` extends ${boundStr}`;
+    return arr.map((param0) => {
+        const param: Partial<ETypeParameter & TypeDeclaration> = param0 as any;
+        let paramStr = "";
+        // 1. direction / variance prefix
+        if (param.direction) {
+            paramStr += `${param.direction} `;
         }
+
+        // 2. name
+        paramStr += param.name || fallback;
+
+        // 3. upper bounds — extends clause
+        if (param.upper?.length) {
+            const upperStr = normalizeArray(param.upper)
+                .map(b => serializeGenericTypeOrType(b, m, asID) || fallback)
+                .filter(e=>!!e)
+                .join(" & ");
+            param.upper.map(b=> GenericType.serializeGenericType(b, m, asID));
+
+            if (param.ebounds) {
+                const boundStr = normalizeArray(param.ebounds).map(b=>GenericType.serializeGenericType(b, m, asID) || fallback).join( " & ");
+                if (boundStr) paramStr += ` extends ${boundStr}`;
+            }
+            if (upperStr) paramStr += ` extends ${upperStr}`;
+        }
+
+        // 4. lower bounds — super clause
+        if (param.lower?.length) {
+            const lowerStr = normalizeArray(param.lower)
+                .map(b => serializeGenericTypeOrType(b, m, asID) || fallback)
+                .filter(Boolean)
+                .join(" & ");
+            if (lowerStr) paramStr += ` super ${lowerStr}`;
+        }
+
+        // 5. default type
+        if (param.defaultType !== undefined) {
+            const defaultStr = serializeGenericTypeOrType(param.defaultType, m, asID);
+            if (defaultStr) paramStr += ` = ${defaultStr}`;
+        }
+
         return paramStr;
-    }).join(", ")
+    }).join(", ");
+}
+
+// dispatcher — routes to the correct serializer depending on whether
+// the value is a GenericType node or a plain TYPE (Pointer / string)
+function serializeGenericTypeOrType(value: GenericType | TYPE, m: LModel, asID: boolean): string | null {
+    if (value instanceof GenericType) {
+        return GenericType.serializeGenericType(value, m, asID);
+    }
+    // plain TYPE: either a Pointer<DClassifier> or a raw string name
+    if (typeof value === "string") return value;
+    return (value as any).name ?? (value as any).toString() ?? null;
 }
 
 /**
- * Helper function to recursively serialize ebounds / etypearguments GObjects.
+ * recursively serialize (eBounds / eTypeArguments / eGenericType / eGenericSuperTypes / eGenericExceptions) GObjects.
  */
-export function serializeECoreGenericType(gType: EBound | EGenericType, m: LModel, asID: boolean = true): string | null {
-    const fallback = null;
-    if (!gType) return fallback;
+// const GTKeys = ["classifier" || "operandsTuple" || "operandsOr" || "operandsAnd" || "operandsDifference" || "operandsComplement" || "operandsArray" || "typeArgs" || ".upper" || "lower" || "kind"] as keyof GenericType
+const J_GTKeys = Object.keys(new GenericType("raw")) as (keyof GenericType)[];
+const E_GTKeys = Object.keys(new EGenericType()) as (keyof EGenericType)[];
+// used in GenericType.serializeEcoreGenericType
+export function serializeECoreGenericType(gType: EBound | EGenericType, m: LModel, asID: boolean = true): string {
+    const fallback = "";
+    // if (!gType) return fallback;
+    // if (typeof gType === "string") return gType;
     gType = normalizeEcoreKeys(gType);
-
     // NB: eclassifier and etypeparameter are mutually exclusive: (public next: List) vs (public next: T)
     // Case 1: The generic type points to a concrete classifier (e.g., #//List)
     if (gType.eclassifier) {
@@ -931,7 +1311,7 @@ export function serializeECoreGenericType(gType: EBound | EGenericType, m: LMode
         return baseName + (args.length ? `<${args}>` : "");
     }
 
-    // Case 2: The generic type points to a local type parameter reference (e.g., #//Composite/B)
+    // Case 2: The generic type points to a local type parameter reference (e.g., #//Composite/B), cannot have type parameter instantiations
     if (gType.etypeparameter) {
         return resolveClassifierName(gType.etypeparameter, m, asID) || fallback;
     }
@@ -945,7 +1325,7 @@ export function serializeECoreGenericType(gType: EBound | EGenericType, m: LMode
 }
 
 let windoww = window as any;
-windoww.serializeECoreGenericType = serializeECoreGenericType;
+windoww.serializeECoreGenericType = GenericType.serializeGenericType;
 windoww.serializeETypeParameter = serializeETypeParameter;
 windoww.test = test;
 setTimeout(()=>{
@@ -1178,7 +1558,7 @@ class ScopedGenericTypeParser {
 
         // explicit scope check replaces the heuristic
         if (this.scopeTypeParams.has(name)) {
-            return new GenericTypeRef("typeParam", undefined, name);
+            return new GenericTypeRef("typeParam" --> became "raw", undefined, name);
         }
         return new GenericTypeRef("raw", name);
     }
@@ -1266,3 +1646,5 @@ function normalizeArray<T>(value: T | T[] | undefined): T[] {
     if (value === undefined || value === null) return [];
     return Array.isArray(value) ? value : [value];
 }
+
+

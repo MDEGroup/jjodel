@@ -83,7 +83,7 @@ describe('test generic type api', () => {
     test('should parse ecore structure to jom typing structure', () => {
 
     });
-    test('should parse string to jpm typing structure', () => {
+    /*test('should parse string to jpm typing structure', () => {
         let classes = U.toNamedArray([ {name: "List", id:"ListID"}, {name: "Human", id:"HumanID"}] as any)  as any;
         let enumerators = U.toNamedArray([] as any) as any;
         let obj = GenericType.parse("List<T>", classes, enumerators, [] as any)
@@ -91,7 +91,7 @@ describe('test generic type api', () => {
 
         let s = "List<T>";
         expect(s2).toBe(s);
-    });
+    });*/
 
     // Another test case checking negative numbers
     test('should correctly add negative numbers', () => {

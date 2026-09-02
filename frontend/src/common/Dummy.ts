@@ -248,7 +248,7 @@ export class Dummy {
             if (!json || typeof json !== 'object') return c.proxyObject as THIS;
             let old = {...json};
             TRANSACTION(thiss.get_name(c) + '.t2m()', () => {
-                json = thiss._convertEcoreToJom_m2(json);
+                json = thiss._convertEcoreToJom_m2(json, c, thiss);
                 console.log('L'+c.data.className.substring(1)+'.t2m() called.', {d:c.data, j: JSON.parse(JSON.stringify(json)), jj: json, old});
                 let childrenToUpdateByID: Dictionary<Pointer,  {json:GObject, l: LModelElement, id: Pointer, k: string}> = {};
                 let childrenToUpdateByName: Dictionary<string, {json:GObject, l: LModelElement, id: Pointer, k: string, i: number}> = {};
@@ -427,7 +427,7 @@ export class Dummy {
                             childrenToUpdateInvalidMismatches.push({k, i, json:v, reason: 'nullish element'});
                             continue;
                         }
-                        (v as GObject) = arr[i] = thiss._convertEcoreToJom_m2(v);
+                        (v as GObject) = arr[i] = thiss._convertEcoreToJom_m2(v, c, thiss);
                         let type = v === null ? 'null' : (Array.isArray(v) ? 'subarray' : typeof v);
                         let isPointer = Pointers.isPointer(v);
                         if (type !== 'object' && !isPointer) {
@@ -645,7 +645,7 @@ export class Dummy {
                         if (Array.isArray(json[k])) for (let i = 0; i < json[k].length; i++) {
                             let child = json[k][i];
                             if (!child) continue;
-                            json[k][i] = child = thiss._convertEcoreToJom_m2(child);
+                            json[k][i] = child = thiss._convertEcoreToJom_m2(child, c, thiss);
                             let collection = getChildrenCollection(k, child, child, json[k], i);
 
                             //console.log('getChildrenCollection post', {collection, k, child, json, old, i});

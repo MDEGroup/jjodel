@@ -779,6 +779,7 @@ border-radius: 6px;
             d.usageDeclarations = usageDeclarations;
             d.edgePointCoordMode = CoordinateMode.absolute;
             d.defaultVSize = defaultEdgePointSize;
+            d.jsCondition = "false /* no automatic matching, only manual activation */"
             // d.defaultVSize = new GraphSize(0, 0, 25, 25);
         }, false, Defaults.Pointer_ViewEdgePoint);
         view.adaptWidth = true; view.adaptHeight = true;

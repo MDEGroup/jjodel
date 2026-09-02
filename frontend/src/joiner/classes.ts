@@ -957,6 +957,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss.packages = []; // packages;
         thiss.isMetamodel = isMetamodel || false;
         thiss.dependencies = [];
+        thiss.typeParameters = [];
         this.setPtr("instanceof", instanceoff || null);
         let lmodel: LModel | undefined = instanceoff ? LPointerTargetable.fromPointer(instanceoff) : undefined;
         this.thiss._persistCallbacks.push(()=>{
@@ -1077,7 +1078,6 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         thiss.isSelected = {};
         thiss.edgesIn = [];
         thiss.edgesOut = [];
-        thiss.subElements = [];
         thiss.zoom = {x:1, y:1} as any;
         // thiss.state = {id: thiss.id+".state", className: thiss.className};
         // 5-way anchors thiss.anchors = {'0':{x:0.5, y:0.5}, '1':{x:0.5, y:0}, '2':{x:1, y:0.5}, '3':{x:0.5, y:1}, '4':{x:0, y:0.5}} as any;
@@ -1103,6 +1103,7 @@ export class Constructors<T extends DPointerTargetable = DPointerTargetable>{
         this.setPtr("model", model);
         this.setPtr("graph", parentgraphID);
         this.setExternalPtr(thiss.father, "subElements", "+=");
+        console.log("0x1 set subelements ct", {f:thiss.father, id:thiss.id, thiss, parentgraphID});
 
         Log.eDev(thiss.father&&DPointerTargetable.fromPointer(thiss.father as Pointer<DGraphElement>)?.subElements.indexOf(thiss.id)!==-1, "subelemnts+= addition have duplicates",
             {adding:thiss, d:thiss.father&&DPointerTargetable.fromPointer(thiss.father as Pointer<DGraphElement>)?.subElements.indexOf(thiss.id)});
@@ -2005,7 +2006,6 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
     protected get_project(c: GObject<Context>): LProject | null {
         return LProject.getProject() || null;
     }
-
 
     __info_of__getByFullPath: Info = {type:  'L | null', txt: 'follows a path until a target element starting from the root element (model, graph or viewpoint)'}
     __info_of__getByPath: Info = {type:  'L | null', txt: 'follows a path until a target element starting from the current element. check also: getByFullPath'}

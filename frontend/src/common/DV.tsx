@@ -958,12 +958,11 @@ foreignObject.label-end, foreignObject.label-start {
             {decorators}
         </div>`
         );
-        let edgePrerenderFunc: string = "(ret)=>{\n" +
-            "// ** preparations and default behaviour here ** //\n" +
-            "// add preparation code here (like for loops to count something), then list the dependencies below.\n" +
-            "// ** declarations here ** //\n" +
-            "\n"+
-            "}";
+        let edgePrerenderFunc: string = `(ret)=>{
+// ** preparations and default behaviour here ** //
+// add preparation code here (like for loops to count something), then list the dependencies below.
+// ** declarations here ** //
+}`;
 
         // let edgeUsageDeclarations = "(ret)=>{\n" +
         //     "// ** preparations and default behaviour here ** //\n" +
@@ -978,108 +977,115 @@ foreignObject.label-end, foreignObject.label-start {
         //     "ret.segments = edge.segments\n"+
         //     "}";
 
-        let edgeUsageDeclarations = "(ret)=>{\n" +
-            "// ** preparations and default behaviour here ** //\n" +
-            "// ret.data = data\n" +
-            "ret.view = view\n" +
-            "// data, edge, view are dependencies by default. delete the line(s) above if you want to remove them.\n" +
-            "// add preparation code here (like for loops to count something), then list the dependencies below.\n\n" +
+        let edgeUsageDeclarations = `(ret)=>{
+// ** preparations and default behaviour here ** //
+// ret.data = data
+ret.view = view
+// data, edge, view are dependencies by default. delete the line(s) above if you want to remove them.
+// add preparation code here (like for loops to count something), then list the dependencies below.
 
+ret.getPosition = () => {
+  if (!ret.segments || !ret.segments.all || !ret.segments.all.length) return null;
+  const all = ret.segments.all;
 
-            "ret.getPosition = () => {\n" +
-            "  if (!ret.segments || !ret.segments.all || !ret.segments.all.length) return null;\n\n" +
-            "  const all = ret.segments.all;\n\n" +
+  const getSector = (p1 = { x: 0, y: 0 }, p2 = { x: 0, y: 0 }) => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    if (dx === 0 && dy === 0) return null;
+    let a = Math.atan2(dy, dx);
+    if (a < 0) a += 2 * Math.PI;
+    // 64 sectors (π/32 each), with half-step offset
+    return Math.floor(((a + Math.PI / 64) % (2 * Math.PI)) / (Math.PI / 32)) + 1;
+};
+const findRule = (rules, s) => {
+  for (let i = 0; i < rules.length; i++) {
+    const r = rules[i];
+    if (s >= r.min && s <= r.max) return r;
+  }
+  return null;
+};
 
-            "  const getSector = (p1 = { x: 0, y: 0 }, p2 = { x: 0, y: 0 }) => {\n" +
-            "    const dx = p2.x - p1.x;\n" +
-            "    const dy = p2.y - p1.y;\n" +
-            "    if (dx === 0 && dy === 0) return null;\n\n" +
-            "    let a = Math.atan2(dy, dx);\n" +
-            "    if (a < 0) a += 2 * Math.PI;\n\n" +
-            "    // 64 sectors (π/32 each), with half-step offset\n" +
-            "    return Math.floor(((a + Math.PI / 64) % (2 * Math.PI)) / (Math.PI / 32)) + 1;\n" +
-            "  };\n\n" +
-            "  const findRule = (rules, s) => {\n" +
-            "    for (let i = 0; i < rules.length; i++) {\n" +
-            "      const r = rules[i];\n" +
-            "      if (s >= r.min && s <= r.max) return r;\n" +
-            "    }\n" +
-            "    return null;\n" +
-            "  };\n\n" +
+// START: sectors → (dx, dy, align)
+const startRules = [
+  { min: 1,  max: 3,  dx:  +5, dy: -25, align: 'left'  },
+  { min: 4,  max: 5,  dx:  +5, dy: -20, align: 'left'  },
+  { min: 6,  max: 6,  dx: +15, dy: -20, align: 'left'  },
+  { min: 7,  max: 17, dx:  -5, dy:  +5, align: 'right' },
+  { min: 18, max: 20, dx:  +5, dy:  +5, align: 'left'  },
+  { min: 21, max: 25, dx:   0, dy:  +5, align: 'left'  },
+  { min: 26, max: 28, dx:  -5, dy:  +5, align: 'left'  },
+  { min: 29, max: 29, dx:  -5, dy: -25, align: 'left'  },
+  { min: 30, max: 32, dx:  -5, dy: -20, align: 'right' },
+  { min: 33, max: 35, dx:  -5, dy:  +5, align: 'right' },
+  { min: 36, max: 37, dx:  -5, dy:  +2, align: 'right' },
+  { min: 38, max: 38, dx:  -5, dy:   0, align: 'right' },
+  { min: 39, max: 49, dx:  +5, dy: -25, align: 'left'  },
+  { min: 50, max: 60, dx:  -5, dy: -25, align: 'right' },
+  { min: 61, max: 64, dx:  +5, dy:  +5, align: 'left'  },
+];
 
-            "  // START: sectors → (dx, dy, align)\n" +
-            "  const startRules = [\n" +
-            "    { min: 1,  max: 3,  dx:  +5, dy: -25, align: 'left'  },\n" +
-            "    { min: 4,  max: 5,  dx:  +5, dy: -20, align: 'left'  },\n" +
-            "    { min: 6,  max: 6,  dx: +15, dy: -20, align: 'left'  },\n" +
-            "    { min: 7,  max: 17, dx:  -5, dy:  +5, align: 'right' },\n" +
-            "    { min: 18, max: 20, dx:  +5, dy:  +5, align: 'left'  },\n" +
-            "    { min: 21, max: 25, dx:   0, dy:  +5, align: 'left'  },\n" +
-            "    { min: 26, max: 28, dx:  -5, dy:  +5, align: 'left'  },\n" +
-            "    { min: 29, max: 29, dx:  -5, dy: -25, align: 'left'  },\n" +
-            "    { min: 30, max: 32, dx:  -5, dy: -20, align: 'right' },\n" +
-            "    { min: 33, max: 35, dx:  -5, dy:  +5, align: 'right' },\n" +
-            "    { min: 36, max: 37, dx:  -5, dy:  +2, align: 'right' },\n" +
-            "    { min: 38, max: 38, dx:  -5, dy:   0, align: 'right' },\n" +
-            "    { min: 39, max: 49, dx:  +5, dy: -25, align: 'left'  },\n" +
-            "    { min: 50, max: 60, dx:  -5, dy: -25, align: 'right' },\n" +
-            "    { min: 61, max: 64, dx:  +5, dy:  +5, align: 'left'  },\n" +
-            "  ];\n\n" +
-            "  const getStart = (p1 = { x: 0, y: 0 }, sector) => {\n" +
-            "    const r = findRule(startRules, sector);\n" +
-            "    if (!r) return null;\n" +
-            "    return { x: p1.x + r.dx, y: p1.y + r.dy, align: r.align, section: sector };\n" +
-            "  };\n" +
-            "  // END: sectors → (dx, dy, align)\n" +
-            "  const endRules = [\n" +
-            "    { min: 1,  max: 1,  dx:  -5, dy: -25, align: 'right' },\n" +
-            "    { min: 2,  max: 5,  dx:  -5, dy:  +5, align: 'right' },\n" +
-            "    { min: 6,  max: 17, dx:  +5, dy: -25, align: 'left'  },\n" +
-            "    { min: 18, max: 25, dx:  -5, dy: -25, align: 'right' },\n" +
-            "    { min: 26, max: 28, dx:  -3, dy: -25, align: 'right' },\n" +
-            "    { min: 29, max: 29, dx:  +5, dy: -25, align: 'right' },\n" +
-            "    { min: 30, max: 32, dx:  +5, dy:  +5, align: 'left'  },\n" +
-            "    { min: 33, max: 37, dx:  +5, dy: -25, align: 'left'  },\n" +
-            "    { min: 38, max: 38, dx: +10, dy: -25, align: 'left'  },\n" +
-            "    { min: 39, max: 48, dx:  -5, dy:  +5, align: 'right' },\n" +
-            "    { min: 49, max: 49, dx: -10, dy:  +5, align: 'right' },\n" +
-            "    { min: 50, max: 60, dx: +10, dy:  +5, align: 'left'  },\n" +
-            "    { min: 61, max: 64, dx: -10, dy: -25, align: 'right' },\n" +
-            "  ];\n\n" +
-            "  const getEnd = (p2 = { x: 0, y: 0 }, sector) => {\n" +
-            "    const r = findRule(endRules, sector);\n" +
-            "    if (!r) return null;\n" +
-            "    return { x: p2.x + r.dx, y: p2.y + r.dy, align: r.align, section: sector };\n" +
-            "  };\n\n" +
-            "  const first = all[0];\n" +
-            "  const last  = all[all.length - 1];\n" +
-            "  const p1 = first.start.pt;\n" +
-            "  const p2 = last.end.pt;\n" +
-            "  let sector, start, end;\n" +
-            "  if (all.length === 1) {\n" +
-            "    sector = getSector(p1, p2);\n" +
-            "    start = getStart(p1, sector);\n" +
-            "    end   = getEnd(p2, sector);\n" +
-            "  } else {\n" +
-            "    // choose an internal reference point consistently\n" +
-            "    const pA = all[1].start?.pt ?? all[1].pt ?? p1;\n" +
-            "    sector = getSector(p1, pA);\n" +
-            "    start = getStart(p1, sector);\n\n" +
-            "    const pB = all[all.length - 1].start?.pt ?? all[all.length - 1].pt ?? p2;\n" +
-            "    sector = getSector(pB, p2);\n" +
-            "    end = getEnd(p2, sector);\n" +
-            "  }\n\n" +
-            "  return { start, end };\n" +
-            "};\n\n" +
-            "// ** declarations here ** //\n\n" +
-            "ret.start = edge.start\n"+
-            "ret.end = edge.end\n"+
-            "ret.segments = edge.segments\n\n"+
-            "ret.position = ret.getPosition()\n"+
-            "ret.edgeview = view?.id\n" +
-            "ret.sPos = ret.position ? ret.position.start : { x: 0, y: 0, align: 'left' }\n"+
-            "ret.ePos = ret.position ? ret.position.end : { x: 0, y: 0, align: 'right' }\n" +
-            "}";
+const getStart = (p1 = { x: 0, y: 0 }, sector) => {
+  const r = findRule(startRules, sector);
+  if (!r) return null;
+  return { x: p1.x + r.dx, y: p1.y + r.dy, align: r.align, section: sector };
+};
+// END: sectors → (dx, dy, align)
+
+const endRules = [
+  { min: 1,  max: 1,  dx:  -5, dy: -25, align: 'right' },
+  { min: 2,  max: 5,  dx:  -5, dy:  +5, align: 'right' },
+  { min: 6,  max: 17, dx:  +5, dy: -25, align: 'left'  },
+  { min: 18, max: 25, dx:  -5, dy: -25, align: 'right' },
+  { min: 26, max: 28, dx:  -3, dy: -25, align: 'right' },
+  { min: 29, max: 29, dx:  +5, dy: -25, align: 'right' },
+  { min: 30, max: 32, dx:  +5, dy:  +5, align: 'left'  },
+  { min: 33, max: 37, dx:  +5, dy: -25, align: 'left'  },
+  { min: 38, max: 38, dx: +10, dy: -25, align: 'left'  },
+  { min: 39, max: 48, dx:  -5, dy:  +5, align: 'right' },
+  { min: 49, max: 49, dx: -10, dy:  +5, align: 'right' },
+  { min: 50, max: 60, dx: +10, dy:  +5, align: 'left'  },
+  { min: 61, max: 64, dx: -10, dy: -25, align: 'right' },
+];
+
+const getEnd = (p2 = { x: 0, y: 0 }, sector) => {
+  const r = findRule(endRules, sector);
+  if (!r) return null;
+  return { x: p2.x + r.dx, y: p2.y + r.dy, align: r.align, section: sector };
+};
+
+const first = all[0];
+const last  = all[all.length - 1];
+console.log('edge ud first', {first});
+const p1 = first.start.pt;
+const p2 = last.end.pt;
+let sector, start, end;
+  if (all.length === 1) {
+    sector = getSector(p1, p2);
+    start = getStart(p1, sector);
+    end   = getEnd(p2, sector);
+  } else {
+    // choose an internal reference point consistently
+    const pA = all[1].start?.pt ?? all[1].pt ?? p1;
+    sector = getSector(p1, pA);
+    start = getStart(p1, sector);
+    const pB = all[all.length - 1].start?.pt ?? all[all.length - 1].pt ?? p2;\
+    sector = getSector(pB, p2);
+    end = getEnd(p2, sector);
+  }
+  return { start, end };
+};
+
+console.log('Edge UD:', {node, edge, data, view, ret});
+// ** declarations here ** //
+
+ret.start = edge.start
+ret.end = edge.end
+ret.segments = edge.segments
+ret.position = ret.getPosition()
+ret.edgeview = view?.id
+ret.sPos = ret.position ? ret.position.start : { x: 0, y: 0, align: 'left' }
+ret.ePos = ret.position ? ret.position.end : { x: 0, y: 0, align: 'right' }
+}`;
 
 
         let ev = DViewElement.new2("Edge"+name, jsx, vp,
@@ -1094,6 +1100,7 @@ foreignObject.label-end, foreignObject.label-start {
                 v.css = css
                 v.usageDeclarations = edgeUsageDeclarations;
                 v.preRenderFunc = edgePrerenderFunc;
+                v.jsCondition = "false /* only manual activation, never automatic */";
             }, false, 'Pointer_ViewEdge' + name);
         return ev;
     }

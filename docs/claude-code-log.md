@@ -13,6 +13,19 @@ rewrite su albero condiviso a causare il secondo incidente. Formato «SHA -> con
 - `ed5c80daa` — referto UNQ1 C5 che cita l'hash del codice sbagliato (`46a38022`, tolto dal
   ramo dal `reset` di un'altra corsia). Corretto in `ca0adaf95`, che lo riporta a `4bde4359`.
 
+## 2026-09-05 — feat(manager): le quattro palette della form del Data Manager (R-SKIN, slice A+B)
+**Prompt**: GO emendato R-SKIN Fase 2. Slice A: registro chiuso `palettes.ts` (nomi, default `Slate`, guardia, `paletteAttr`) e campo `formPalette?` su `DViewElement` accanto a `formTheme`, nessuna migrazione. Slice B: i nove token in `styles/tokens/_form-palettes.scss`, DUE regole per palette (light e `:root[data-theme="dark"]`), `data-palette` su `.instance-manager`. Poi calibrazione a schermo all'HARD STOP, light e dark.
+**Files touched**: slice A — `frontend/src/jjform/palettes.ts` (nuovo), `frontend/src/jjform/index.ts`, `frontend/src/jjform/__tests__/palettes.test.ts` (nuovo), `frontend/src/view/viewElement/view.tsx`, commit `08abf6355`. Slice B — `frontend/src/styles/tokens/_form-palettes.scss` (nuovo), `frontend/src/styles/tokens/index.scss`, `frontend/src/components/abstract/tabs/InstanceManagerTab.tsx`, commit `a8c8aae45`. Calibrazione di Paper — `_form-palettes.scss`, commit `f3459a29f`. Sonda a parte: `b30fbdf66`, riallineata alle attese calibrate nel commit docs di questo giro.
+**Outcome**: ✅ completed
+**Corregge**: —
+**Causa**: —
+**Regressions**: no — `npm run typecheck` 33 su output completo (baseline esatta §17), `npm run build` exit 0 col solo avviso di chunk-size, `vitest run src/jjform` 364/364 su 13 file. Nessun progetto senza `formPalette` cambia: `Slate` non ha regole, e' `:root` (blocchi A e D della sonda).
+**Out-of-scope changes**: yes — due deroghe dichiarate, vedi Notes.
+**Layer Impact Report**: not-required — nessun file di §3.1. `InstanceManagerTab.tsx` legge un campo in piu' da `idlookup`, nessuna scrittura.
+**Smoke visivo**: passato — sonda `probe_2026-09-05_rskin_sliceB_palettes.mts`, **18 PASS 0 FAIL** dopo la calibrazione, piu' gli otto screenshot (quattro palette in light, quattro in dark). Q2 misurata dove serviva: `getComputedStyle` su una cella della TABELLA e su un controllo del DRAWER danno gli stessi valori per ogni palette, cioe' una scrittura copre due superfici. R2 esercitato: in dark le tre palette portano i valori scuri, non quelli chiari.
+**Notes**: Deroga 1: il riesporto sta in `jjform/index.ts`, non in `joiner/index.ts` come diceva la slice A — `InstanceManagerTab` importa da `jjform`, a specchio di `formTheme`, e `joiner` resta intatto. Deroga 2: `--color-form-summary` scritto per tutte e tre le palette. Fuori corsia, da registrare: in dark il rail sinistro e l'outline restano chiari — e' lo stato del tema scuro dell'app, non della palette.
+**Prompt document name**: 2026-09-04 23:30
+
 ## 2026-09-04 — fix(jjtl): accept newlines inside nested object creation
 **Prompt**: la forma multiriga di object creation (`-> attr {` a capo `-> Class {`, quella
 documentata in SPEC §3.3) produce `targetClass = attr` senza errori di parsing né di Validate;

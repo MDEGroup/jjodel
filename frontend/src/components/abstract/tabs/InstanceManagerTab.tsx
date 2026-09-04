@@ -143,6 +143,7 @@ import {
 import { entityLetter } from '../../../common/entityMeta';
 import { saveProjectWithFeedback } from '../../../common/libraries/saveProject';
 import { DATA_MANAGER_VIEWPOINT_ID, LProject, U } from '../../../joiner';
+import { paletteAttr } from '../../../jjform';
 import './instanceManagerTab.scss';
 
 /** La lettera del badge di metaclasse, dal registro delle entita' e non da una
@@ -1533,6 +1534,27 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
         computeIRSignature(state, DATA_MANAGER_VIEWPOINT_ID),
         DATA_MANAGER_VIEWPOINT_ID,
     ));
+
+    /**
+     * La PALETTE, dal singleton (R-SKIN), scritta sulla radice come `data-palette`.
+     *
+     * QUI e non su `.ir-form`: la tabella legge gli stessi nove token della form — 143
+     * righe di `instanceManagerTab.scss`, `--color-form-muted` da solo 44 volte — e questa
+     * radice e' antenata della `.ir-form` che il drawer monta. Una scrittura, due superfici.
+     * Sull'altra radice la form cambierebbe aspetto e la tabella sopra di essa no, sulla
+     * stessa schermata (R-SKIN-3-bis (b)).
+     *
+     * `paletteAttr` non restituisce mai vuoto: senza singleton, senza campo, o con un nome
+     * che questa versione non conosce, l'attributo e' `slate`, che nel foglio di stile non
+     * matcha nessuna regola ed e' quindi l'aspetto di oggi. E' la ragione per cui nessun
+     * progetto salvato cambia (R-SKIN-2) senza che il default sia scritto una seconda volta.
+     *
+     * Un `useSelector` a se', che rende una STRINGA: il valore cambia quando qualcuno sceglie
+     * una palette, non a ogni scrittura sul modello, e una stringa non ri-renderizza finche'
+     * resta uguale a se stessa. Stessa forma del rung del tema in `IRForm`.
+     */
+    const palette = useSelector((state: any) =>
+        paletteAttr(state?.idlookup?.[DATA_MANAGER_VIEWPOINT_ID]?.formPalette));
     const managerResolution = useMemo(
         () => (selectedClassId
             ? resolveTableSpec(selectedClassId, irIndex, idlookup)
@@ -2175,7 +2197,7 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
     };
 
     return (
-        <div className="instance-manager">
+        <div className="instance-manager" data-palette={palette}>
             {/* ── L'outline di containment (10b) ──────────────────────────────
                 Quarta colonna, la prima da sinistra: AFFIANCA il catalogo, non lo
                 sostituisce. «Outline per il dove, tabella per il quanto» — la nota

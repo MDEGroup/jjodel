@@ -2970,6 +2970,16 @@ del tema; rimappature in `styles/tokens/` (regola 28), mai nei componenti; nome 
 stringa su `formSkin?` del singleton Data Manager Viewpoint (additivo, nessuna migrazione, R-DMV-6);
 select nel pannello del singleton sotto Form theme.
 
+**R-SKIN-3-bis** (2026-09-04, dopo il referto `discovery_2026-09-04_form_skins.md`) — **Emendamenti**:
+(a) il vocabolario è `palette`, non `skin` (`FormPaletteName`, `formPalette`, `data-palette`,
+`jjform/palettes.ts`, etichetta «Palette» nel pannello): la parola «skin» è già presa in questi stessi
+file (`LegacySkin`, `LEGACY_SKIN_PRESET`, `ir-form--plain`); la serie resta R-SKIN come nome storico.
+(b) `data-palette` va sulla radice `.instance-manager`, non su `.ir-form`: la tabella legge gli stessi
+nove token (143 righe in `instanceManagerTab.scss`) e sta sulla stessa schermata del drawer; una
+scrittura copre entrambi. (c) `--radius-sm` è fuori dalla lista: alias globale, una palette parla di
+colore. (d) La tabella token × palette del referto §9 è la bozza di partenza; i valori si calibrano a
+schermo, light e dark, all'HARD STOP della slice B.
+
 **R-SKIN-4** (2026-09-04) — **Le skin per view di `irTypes.ts`** (`plain | card | compact | inspector`)
 non si toccano: sono literal definitivi (R-B9) rimappati su preset di layout, un'altra cosa con un
 nome simile. La riconciliazione resta il debito FL4 già registrato in `themes.ts`.

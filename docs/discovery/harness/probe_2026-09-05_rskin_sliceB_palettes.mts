@@ -249,7 +249,7 @@ check('A2 `slate` NON rimappa: i token sono quelli di :root (#ffffff / #e2e8f0)'
 // ── B. le tre palette in light, su ENTRAMBE le superfici ────────────────────
 console.log('\n-- B. le tre palette, tabella E drawer (Q2) ------------------');
 const EXPECT_LIGHT: Record<string, { surface: string; border: string }> = {
-    paper: { surface: '#fffdf8', border: '#e8dfcc' },
+    paper: { surface: '#fbf7ee', border: '#ddd2b8' },
     ink:   { surface: '#ffffff', border: '#334155' },
     mist:  { surface: '#f7f9fb', border: 'rgba(15, 23, 42, 0.05)' },
 };
@@ -283,7 +283,7 @@ check('C0 positivo di controllo: senza palette il dark e\' quello di :root[data-
     darkSlate?.table?.surface === '#16181a',
     `atteso #16181a, letto ${JSON.stringify(darkSlate?.table)}`);
 
-const EXPECT_DARK: Record<string, string> = { paper: '#1c1915', ink: '#000000', mist: '#131517' };
+const EXPECT_DARK: Record<string, string> = { paper: '#201c16', ink: '#000000', mist: '#131517' };
 for (const name of ['Paper', 'Ink', 'Mist']) {
     note(`setPalette(${name})`, await setPalette(name));
     await page.waitForTimeout(1500);

@@ -43,6 +43,19 @@ decidere in chat (F4). Deroga a §6 del prompt ("un solo commit"): `CLAUDE.md` �
 codice nello stesso commit, quindi due commit.
 **Prompt document name**: 2026-09-04 18:50
 
+## 2026-09-05 — docs: discovery delle skin della form del Data Manager (R-SKIN, Fase 1)
+**Prompt**: Fase 1 read-only di R-SKIN: falsificare H1..H6 (colori diretti nella form, censimento dei token, `--color-form-*` in entrambi i file colori, dove vive la regola `[data-skin]`, il pattern di `formTheme` per `formSkin`, la tabella dentro o fuori la skin), referto con `file:riga` e tabella token × skin, hard stop prima di qualunque codice.
+**Files touched**: `docs/discovery/discovery_2026-09-04_form_skins.md` (nuovo, 529 righe) — commit `715054349`.
+**Outcome**: ✅ completed
+**Corregge**: —
+**Causa**: —
+**Regressions**: no — nessun file di codice toccato, `frontend/src` pulito a fine giro. Nessun comando di build o test eseguito, dichiarato nel referto §15.
+**Out-of-scope changes**: no
+**Layer Impact Report**: not-required — nessun file di §3.1 implicato; `VersionFixer.tsx` non letto e non necessario (`formSkin?` additivo come `formTheme`).
+**Smoke visivo**: non applicabile — nessun pixel cambia.
+**Notes**: **H6 falsificata**, ed e' il finding: `instanceManagerTab.scss` legge `--color-form-*` su **143 righe**, quindi una skin agganciata a `.ir-form` cambierebbe il drawer e non la tabella sopra di esso. `.instance-manager` e' antenato di `.ir-form`: un attributo, entrambi. Secondo finding: la parola «skin» e' gia' presa (`LegacySkin`, `LEGACY_SKIN_PRESET`, `ir-form--plain` sulla stessa radice). Sei domande, due chiuse in discovery.
+**Prompt document name**: 2026-09-04 23:02
+
 ## 2026-09-05 — feat(ir): la view di classe svuotata si pota (R-DMV slice F, chiude la Fase 2)
 **Prompt**: GO emendato R-DMV Fase 2, slice F: `pruneForm` esteso a `order`/`labels`/`hidden` (non `basic`), potatore separato per `table` sull'ir, e la view del singleton svuotata (ne' `form` ne' `table`) che si rimuove facendo sparire la classe dall'albero. Test su `pruneForm` e sul potatore.
 **Files touched**: `frontend/src/components/editor-v2/viewpoint/authoring/FormAuthoringBody.tsx`, `.../ir/irPrune.ts` (nuovo), `.../ir/__tests__/irPrune.test.ts` (nuovo), `frontend/src/components/editors/viewpoint/properties/DataManagerViewpointPanel.tsx` — commit `317ec973b`. Sonda a parte: `acd5c72d6`.

@@ -2953,6 +2953,28 @@ override per progetto.
 finché un fronte R-DEAD non li toglie con misura; nessun progetto li porta.
 
 
+## Serie R-SKIN — le skin della form del Data Manager (ratifiche 2026-09-04)
+
+Memo: `docs/ratifiche/claude_2026-09-04_2302_memo_ratifica_form_skins.md`.
+
+**R-SKIN-1** (2026-09-04) — **Una skin è un preset chiuso di ASPETTO**, ortogonale al tema di layout
+(FL2, tre campi): rimappa i token della form già in uso, non introduce proprietà CSS nuove, non offre
+nulla di customizzabile all'utente (né colori né slider). Registro chiuso in `jjform/skins.ts`, zero
+import, a specchio di `themes.ts`.
+
+**R-SKIN-2** (2026-09-04) — **Catalogo: `Slate`, `Paper`, `Ink`, `Mist`**, quattro e non più. `Slate`
+è l'aspetto di oggi ed è il default: nessun progetto cambia. Ogni preset completo in light e dark.
+
+**R-SKIN-3** (2026-09-04) — **Meccanica**: `data-skin` sulla radice `.ir-form` accanto ai tre `data-*`
+del tema; rimappature in `styles/tokens/` (regola 28), mai nei componenti; nome persistito come
+stringa su `formSkin?` del singleton Data Manager Viewpoint (additivo, nessuna migrazione, R-DMV-6);
+select nel pannello del singleton sotto Form theme.
+
+**R-SKIN-4** (2026-09-04) — **Le skin per view di `irTypes.ts`** (`plain | card | compact | inspector`)
+non si toccano: sono literal definitivi (R-B9) rimappati su preset di layout, un'altra cosa con un
+nome simile. La riconciliazione resta il debito FL4 già registrato in `themes.ts`.
+
+
 ## Superate
 
 - **D3** (2026-07-26, routing congelato in v1) — superata da E-route il 2026-08-06.

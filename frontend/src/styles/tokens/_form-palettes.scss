@@ -45,27 +45,27 @@
 /* ─── Paper — warm ivory surface, soft sand borders ────────────────────────── */
 
 .instance-manager[data-palette="paper"] {
-  --color-form-surface: #fffdf8;
-  --color-form-panel: #faf6ec;
-  --color-form-border: #e8dfcc;
-  --color-form-border-strong: #d6c9ae;
+  --color-form-surface: #fbf7ee;
+  --color-form-panel: #f3ecdb;
+  --color-form-border: #ddd2b8;
+  --color-form-border-strong: #c9bb98;
   --color-form-muted: #a1937a;
   --color-form-label: #6b5f4a;
   --color-form-section: #8a7c63;
   --color-form-summary: #fdfaf3;
-  --color-bg-tertiary: #f3ecdd;
+  --color-bg-tertiary: #efe6d2;
 }
 
 :root[data-theme="dark"] .instance-manager[data-palette="paper"] {
-  --color-form-surface: #1c1915;
-  --color-form-panel: #14120f;
+  --color-form-surface: #201c16;
+  --color-form-panel: #17140f;
   --color-form-border: rgba(232, 223, 204, 0.12);
   --color-form-border-strong: rgba(232, 223, 204, 0.22);
   --color-form-muted: #8a7f6a;
   --color-form-label: #bdb29a;
   --color-form-section: #8a7f6a;
   --color-form-summary: #18150f;
-  --color-bg-tertiary: #211d18;
+  --color-bg-tertiary: #28221a;
 }
 
 /* ─── Ink — high contrast, crisp borders, full-strength labels ─────────────── */

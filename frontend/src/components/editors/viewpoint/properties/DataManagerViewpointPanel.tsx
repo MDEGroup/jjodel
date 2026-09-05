@@ -26,7 +26,15 @@ import {
 import { overrideIsCompatible } from '../../../editor-v2/viewpoint/ir/useFormWidgets';
 import { isPrunableClassView, withViewForm } from '../../../editor-v2/viewpoint/ir/irPrune';
 import type { FormSpec, VertexViewIR, WidgetKind } from '../../../editor-v2/viewpoint/ir/irTypes';
-import { FORM_THEME_DEFAULT_NAME, FORM_THEME_NAMES, type FormThemeName } from '../../../../jjform';
+import {
+    FORM_PALETTE_DEFAULT_NAME,
+    FORM_PALETTE_NAMES,
+    FORM_PALETTE_PRESETS,
+    FORM_THEME_DEFAULT_NAME,
+    FORM_THEME_NAMES,
+    type FormPaletteName,
+    type FormThemeName,
+} from '../../../../jjform';
 // Same self-import as ViewpointProperties, and for the same reason: `.wp-field` and
 // `.workbench-properties` must render when Info.tsx mounts this outside WorkbenchProperties.
 import './properties.scss';
@@ -240,6 +248,29 @@ const DataManagerViewpointPanel: React.FC<DataManagerViewpointPanelProps> = ({ v
     }, [writeViewpoint]);
 
     /**
+     * The PALETTE, the second axis of the same surface (R-SKIN).
+     *
+     * NO `__inherit__` SENTINEL HERE, and that is a deliberate divergence from the theme
+     * select right above. `Slate` is not a preset that happens to be the default: it is
+     * the ABSENCE of a palette — the one name with no rule in `_form-palettes.scss`, so
+     * that a project which never chose reads as `:root` (R-SKIN-2). A sentinel would put
+     * two entries in this list with one visible effect and two different persisted states.
+     *
+     * So the four names are the four options, absent shows as `Slate`, and CHOOSING
+     * `Slate` WRITES `undefined`: a viewpoint whose palette was set and then set back
+     * round-trips identical to one where it was never set, which is the same discipline
+     * `writeForm` applies to the `form` key below.
+     */
+    const currentPalette = ((viewpoint as any)?.formPalette as FormPaletteName | undefined)
+        ?? FORM_PALETTE_DEFAULT_NAME;
+    const handlePaletteChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+        const v = e.target.value as FormPaletteName;
+        writeViewpoint(lvp => {
+            lvp.formPalette = v === FORM_PALETTE_DEFAULT_NAME ? undefined : v;
+        });
+    }, [writeViewpoint]);
+
+    /**
      * The write, and with it the materialization of R-DMV-6, in ONE place.
      *
      * Two rungs, two BARE calls: `ensureDataManagerViewpoint` and `DViewElement.new2` each
@@ -378,6 +409,23 @@ const DataManagerViewpointPanel: React.FC<DataManagerViewpointPanelProps> = ({ v
                 >
                     <option value={FORM_THEME_INHERIT}>Default ({FORM_THEME_DEFAULT_NAME})</option>
                     {FORM_THEME_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+            </div>
+
+            <div className="wp-field">
+                <label className="wp-field__label">Palette</label>
+                <select
+                    className="wp-field__select"
+                    value={currentPalette}
+                    onChange={handlePaletteChange}
+                    disabled={readOnly}
+                    title="Appearance of the Data Manager: surfaces, borders and muted tones, for the instance table and the drawer alike. Orthogonal to the theme above, which is layout."
+                >
+                    {FORM_PALETTE_NAMES.map(n => (
+                        <option key={n} value={n} title={FORM_PALETTE_PRESETS[n].description}>
+                            {FORM_PALETTE_PRESETS[n].label}{n === FORM_PALETTE_DEFAULT_NAME ? ' (default)' : ''}
+                        </option>
+                    ))}
                 </select>
             </div>
 

@@ -13,6 +13,19 @@ rewrite su albero condiviso a causare il secondo incidente. Formato «SHA -> con
 - `ed5c80daa` — referto UNQ1 C5 che cita l'hash del codice sbagliato (`46a38022`, tolto dal
   ramo dal `reset` di un'altra corsia). Corretto in `ca0adaf95`, che lo riporta a `4bde4359`.
 
+## 2026-09-05 — feat(rail): la select «Palette» del Data Manager (R-SKIN slice C, chiude la Fase 2)
+**Prompt**: GO emendato R-SKIN Fase 2, slice C: select «Palette» nel `DataManagerViewpointPanel` sotto «Form theme», stesso `writeViewpoint`, default `Slate`. Sonda end-to-end su B+C su tabella e drawer; negativo: un progetto senza `formPalette` identico a oggi. HARD STOP dopo il commit.
+**Files touched**: `frontend/src/components/editors/viewpoint/properties/DataManagerViewpointPanel.tsx` — commit `8116e35da`. Sonda a parte: `probe_2026-09-05_rskin_sliceC_select.mts` (nuova).
+**Outcome**: ✅ completed
+**Corregge**: —
+**Causa**: —
+**Regressions**: no — `npm run typecheck` 33 su output completo (baseline esatta §17), `npm run build` exit 0 col solo avviso di chunk-size, vitest 1782/1782 su `components/editors`, `components/editor-v2`, `components/abstract`, `components/TreeViewSidebar`. `viewpointThemeHint.test.ts` verde: `ViewpointProperties.tsx` non e' stato toccato. Banco delle mutazioni (P11), due giri: la select che scrive sempre il nome (niente `undefined` su `Slate`) -> D1 rosso, e D2 resta verde, che e' la ragione per cui D1 esiste; la select spostata SOPRA «Form theme» -> A1 rosso.
+**Out-of-scope changes**: no
+**Layer Impact Report**: not-required — nessun file di §3.1. `ensureDataManagerViewpoint` dentro `writeViewpoint` resta una chiamata NUDA (§3.3).
+**Smoke visivo**: passato — sonda `probe_2026-09-05_rskin_sliceC_select.mts`, **15 PASS 0 FAIL**, il giro intero dalla porta dell'utente. A: la select c'e' SOTTO «Form theme» (ordine, non sola presenza), quattro opzioni in ordine di catalogo, legge `Slate` col singleton assente, e aprire il rail non materializza. B: scelta `Paper`, il singleton nasce `dataManager` + `isExclusiveView: true` col nome scritto nel campo. C: nel manager la tabella E il drawer portano i valori calibrati di Paper (Q2, misurata stavolta dal gesto e non da console). D: rimessa `Slate`, il campo torna ASSENTE e le due superfici tornano a `:root`.
+**Notes**: Scostamento dichiarato dal controllo gemello: nessun sentinella `__inherit__`. `Slate` e' l'ASSENZA di palette — l'unico nome senza regole nel foglio — quindi sceglierlo scrive `undefined`, e la lista non porta due voci con un solo effetto visibile e due stati persistiti diversi. Fuori corsia, gia' registrato nella entry A+B: in dark il rail sinistro e l'outline restano chiari, ed e' il tema scuro dell'app, non la palette.
+**Prompt document name**: 2026-09-04 23:30
+
 ## 2026-09-05 — feat(manager): le quattro palette della form del Data Manager (R-SKIN, slice A+B)
 **Prompt**: GO emendato R-SKIN Fase 2. Slice A: registro chiuso `palettes.ts` (nomi, default `Slate`, guardia, `paletteAttr`) e campo `formPalette?` su `DViewElement` accanto a `formTheme`, nessuna migrazione. Slice B: i nove token in `styles/tokens/_form-palettes.scss`, DUE regole per palette (light e `:root[data-theme="dark"]`), `data-palette` su `.instance-manager`. Poi calibrazione a schermo all'HARD STOP, light e dark.
 **Files touched**: slice A — `frontend/src/jjform/palettes.ts` (nuovo), `frontend/src/jjform/index.ts`, `frontend/src/jjform/__tests__/palettes.test.ts` (nuovo), `frontend/src/view/viewElement/view.tsx`, commit `08abf6355`. Slice B — `frontend/src/styles/tokens/_form-palettes.scss` (nuovo), `frontend/src/styles/tokens/index.scss`, `frontend/src/components/abstract/tabs/InstanceManagerTab.tsx`, commit `a8c8aae45`. Calibrazione di Paper — `_form-palettes.scss`, commit `f3459a29f`. Sonda a parte: `b30fbdf66`, riallineata alle attese calibrate nel commit docs di questo giro.

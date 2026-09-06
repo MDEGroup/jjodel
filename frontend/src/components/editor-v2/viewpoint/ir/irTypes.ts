@@ -263,6 +263,85 @@ export interface FormSpec {
     features?: Record<string, FeatureTreatment>;
     /** Feature names visible in Basic. Absent = heuristic `lowerBound >= 1`. */
     basic?: string[];
+    /**
+     * Feature names in display order (2026-09-03, R-VP-8, R-VP-13). `order` sorts the
+     * fields INSIDE the section their type assigns them; it moves none across sections
+     * and removes none: the names not listed follow the listed ones in today's order.
+     * The section partition of `formSections.buildFormSections` (attributes, references,
+     * children) is untouched, and R-FRM-1 holds: ordering never filters.
+     */
+    order?: string[];
+    /**
+     * Label override per feature name (R-VP-8). Absent = the feature name, as today.
+     * Only the printed label changes: writes, offers and diagnostics keep the name.
+     */
+    labels?: Record<string, string>;
+    /**
+     * Feature names NOT rendered in this form (R-VP-8). EXPLICIT: a feature is hidden
+     * only when listed here (or as `features: 'hidden'`, which stays the channel for
+     * references and containment); omission from `order` or `basic` never hides
+     * (R-FRM-1). Applied in both modes, in the same place as `features: 'hidden'`.
+     */
+    hidden?: string[];
+    /**
+     * Per-host override (2026-09-03, R-VP-12), resolved field by field over this base
+     * spec by `formHosts.resolveFormSpec`: the manager's drawer form → base `FormSpec`
+     * → type-derived default. Only `manager` is admitted in this slice; the type
+     * excludes the rail and the node form on purpose, not by convention. The word is
+     * `hosts`, never `surfaces`: `VertexViewIR.surface` (R-FORM-3, Q5) is a different,
+     * ratified thing, and the two must not sit one letter apart.
+     */
+    hosts?: { manager?: FormHostOverride };
+}
+
+/**
+ * What a host may override in the base `FormSpec` (R-VP-12): every key but `hosts`
+ * itself, each optional. Merge rule (see `formHosts.resolveFormSpec`): the records
+ * `widgets`, `features`, `labels` merge per feature with the override winning; the
+ * lists `order`, `hidden`, `basic` and the scalars `theme`, `labelPlacement` replace
+ * the base value whole when present.
+ *
+ * `widgets` here reaches the drawer form only; the manager table does not map rung 0
+ * yet (R-VP-9, slice 1b).
+ */
+export type FormHostOverride = Partial<Omit<FormSpec, 'hosts'>>;
+
+/**
+ * TableSpec (2026-09-03, R-VP-3) — OPTIONAL supplement declaring how the DATA MANAGER
+ * shows the instances of this metaclass. The manager has no viewpoint of its own: its
+ * visual aspects are a section of the same per-class view, additive over ir-1.3 in the
+ * style of `FormSpec`.
+ *
+ * Additive: no irVersion bump and no VersionFixer migration, same precedent as `form`
+ * and `structure`. Since the saved IR has no VersionFixer at all (R-B9), every literal
+ * below is DEFINITIVE once written.
+ *
+ * CONSTRAINT — the same one `FormSpec` carries, for the same reason: no key named `op`
+ * with a string value, at any depth. `irValidate.findUnknownPredicateOp` walks the whole
+ * ir and would reject the entire view with a message about predicates.
+ *
+ * OVERRIDE, NEVER PREREQUISITE (R-VP-4): a manager whose class declares no `table`
+ * works on the type-derived default, which is what every project has today.
+ */
+export interface TableSpec {
+    /**
+     * Feature names, in the order they lead the table. Absent = `tableColumns(cls)` as
+     * today.
+     *
+     * ORDERS, DOES NOT FILTER (R-VP-10). A column not named here follows the named ones
+     * in today's order and stays VISIBLE: what removes a column is the automatic
+     * reduction (empty columns, the duplicated name) with the session choice above it,
+     * and that must stay the only channel — a second place where a column can disappear
+     * is what `InstanceManagerTab.tsx` (the `hiddenColumnKeys` comment) exists to refuse.
+     *
+     * A name matching no feature of the class is IGNORED, never a throw: a view is
+     * persisted for good and a metaclass can lose a feature after the view was authored.
+     *
+     * `name` is not here to be governed: it is not a feature of the metamodel and does
+     * not appear in `tableColumns` — the table prints it apart, and the panel offers it
+     * as a locked entry (`instanceTable.NAME_COLUMN_KEY`).
+     */
+    columns?: string[];
 }
 
 /**
@@ -349,6 +428,12 @@ export interface VertexViewIR {
      * sez. 10). Additive optional field: no irVersion bump, no migration.
      */
     form?: FormSpec;
+    /**
+     * Data Manager supplement (2026-09-03, R-VP-3). Absent = the manager shows this
+     * metaclass with the columns it derives from the type. Additive optional field:
+     * no irVersion bump, no migration.
+     */
+    table?: TableSpec;
 }
 
 /**
@@ -377,6 +462,13 @@ export interface GraphVertexViewIR {
      * sez. 10). Additive optional field: no irVersion bump, no migration.
      */
     form?: FormSpec;
+    /**
+     * Data Manager supplement (2026-09-03, R-VP-3). Both node views share the byMetaclass
+     * bucket in irResolveCore (:210) and the manager lists objects, not edges;
+     * object-as-edge is a canvas rendering choice, in the manager the object is a row.
+     * EdgeViewIR lives in objectAsEdgeByMetaclass and is out.
+     */
+    table?: TableSpec;
     containment: {
         /** Which contained children render inside the hull; absent = all containment-reference children. */
         childFilter?: Predicate;

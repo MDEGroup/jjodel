@@ -51,6 +51,7 @@ import {collectViewSubtree} from "./viewSubtree";
 import {computeCreationSeed} from "../../components/editor-v2/viewpoint/ir/irCreationSeed";
 import type {AnyViewIR} from "../../components/editor-v2/viewpoint/ir/irTypes";
 import type {FormThemeName} from "../../jjform/themes";
+import type {FormPaletteName} from "../../jjform/palettes";
 
 let CSS_Units0 = {'Local-font relative':{
         'cap':     'cap - (Cap height) the nominal height of capital letters of the element\'s font.',
@@ -246,6 +247,32 @@ export class DViewElement extends DPointerTargetable {
      * this wins over the factory default.
      */
     formTheme?: FormThemeName;
+    /**
+     * The FORM PALETTE chosen at the VIEWPOINT level (R-SKIN).
+     *
+     * One of `FORM_PALETTE_NAMES` — the four presets of `jjform/palettes.ts` — or absent.
+     * ABSENT IS A VALUE, exactly as for `formTheme` above: it means «this viewpoint states
+     * no opinion», which resolves to `Slate`, which is the appearance committed before the
+     * field existed. That is why no VersionFixer migration accompanies it — a saved project
+     * has no `formPalette`, reads as absent, and renders byte for byte as it did.
+     *
+     * ORTHOGONAL to `formTheme`: that one names a LAYOUT preset (label placement, density,
+     * section chrome), this one names an APPEARANCE preset (nine colour tokens). Two fields
+     * because they are two axes; `Compact` + `Paper` is a legitimate combination.
+     *
+     * NOT `palette`, which is taken on this same class (`:327`) by the legacy per-view
+     * colour map the classic CSS compiler reads. Different thing, and close enough that the
+     * name has to say which one it is.
+     *
+     * Declared HERE and not on `DViewPoint` for the reason stated above for `formTheme`:
+     * `DViewPoint` carries no own data field at all.
+     *
+     * READ BY: `InstanceManagerTab.tsx`, from the Data Manager singleton (R-DMV-1), which
+     * writes it onto the manager root as `data-palette`. WRITTEN BY: the «Palette» select of
+     * `DataManagerViewpointPanel.tsx`, through the same `writeViewpoint` that materializes
+     * the singleton on first write (R-DMV-6).
+     */
+    formPalette?: FormPaletteName;
 
     // processate 1 sola volta all'applicazione della vista o all'editing del campo
     constants?: string;

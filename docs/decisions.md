@@ -1082,6 +1082,23 @@ Base di evidenza: `docs/discovery/discovery_2026-08-13_view_creation_sites_ir_na
   reale con una premessa nuova, motivata sul pannello futuro, non su R-IRN-22. Conseguenza: la
   condizione di R-LAY-7 («dopo la slice 2 di `2.228`») e' soddisfatta; il fronte layout riparte dal
   prompt del 2026-08-22 17:05, da riallineare a R-LAY-11, R-LAY-12 e R-DEAD prima del lancio.
+- **R-IRN-28** (2026-09-03) — **`DProject.version` e' un'etichetta, non una chiave; la finestra di
+  300 ms di VER2 e' un limite dichiarato, non una regressione.** Misurato il 2026-09-03 su
+  `4b43c5e36`, `command grep` su `frontend/src` esclusi `DState.version.n`, `APP_VERSION`,
+  `irVersion` e i test: i consumatori della revisione sono il display (`Rev X.Y` in
+  `ProjectEditor.tsx:2152`, `Project.tsx:363`, `:522`, `:639`), i metadati di export
+  (`ProjectEditor.tsx:725`, `:753`, `LeftBar.tsx:219`, `UpdateProjectRequest.ts:56`) e il round-trip
+  di persistenza (`projects.ts:130-132`, `:190`, `:205`, `:321`, `:469`). Nessun lookup, nessun
+  confronto, nessuno storico indicizzato per revisione: `localStorage['projects']` tiene un solo
+  `state` per id, e `Collaborative.ts`, `CollaborativeAttacher.tsx`, `editors/Collaborative.tsx`
+  non contengono la parola `version`. Due save espliciti entro `U.UpdatingTimer` (300 ms) che
+  condividono il numero sono percio' una cosmesi del contatore, non una collisione fra stati: la
+  deroga RC-11 di VER2 (`12e06b2ba`) e' accettata e chiusa cosi', senza la via (e) del `COMMIT`
+  forzato, che sarebbe una modifica core comprata per igiene e non per funzione. Da riaprire solo
+  se un consumatore comincia a usare la revisione come identificatore di stato (ripristino, storico,
+  merge collaborativo): quel giorno la corsia sulla transazione sempre aperta (`reducer.ts:1443`)
+  riparte da questa misura. Ratificata da Alfonso il 2026-09-03 su proposta della chat, dopo la
+  domanda posta da Claude Design.
 
 ## Serie R-SIM — Pannello di simulazione e attributi di stato (ratifiche 2026-08-17)
 
@@ -2819,6 +2836,153 @@ attributi, l'auto-id di R-CR2-1, composition e reference pure — continua ad ar
 `openInCanvas` coprono già il bisogno che le motivava: una seconda superficie di navigazione
 locale sarebbe un secondo canvas, che è esattamente ciò che 13a si era vietata. Chiuse per
 sufficienza del sostituto, non rimandate.
+
+
+## Serie R-VP — viewpoint vs annotazioni per il Data Manager (ratifiche 2026-09-03)
+
+Memo: `docs/ratifiche/claude_2026-09-03_1441_memo_ratifica_viewpoint_vs_annotazioni.md`.
+Report per R-VP-9..13: `docs/discovery/discovery_2026-09-03_rvp_slice1_manager_section.md`.
+
+**R-VP-1** (2026-09-03) — **Criterio di collocazione**: nel metamodello ciò che cambia significato o
+validità dei dati; nel viewpoint ciò che cambia solo come i dati vengono mostrati o editati. Il
+criterio è semantico, non visuale.
+
+**R-VP-2** (2026-09-03) — **Destinazione delle chiavi `jjodel/*`**: `unit`, `min`, `max` → tipo
+scalare raffinato; `renderer`, `multiline` → viewpoint, nella libreria di row view condivisa.
+
+**R-VP-3** (2026-09-03, **superata da R-DMV-1 il 2026-09-04**) — **Il manager non ha un viewpoint proprio.** I suoi aspetti visuali sono una
+sezione della stessa view per classe, additiva su ir-1.3 nello stile del `FormSpec`. Viewpoint
+separato escluso.
+
+**R-VP-4** (2026-09-03) — **Il viewpoint è override, mai prerequisito**: il manager funziona col
+default derivato dal tipo quando la sezione non c'è.
+
+**R-VP-5** (2026-09-03) — **Ladder a tre gradini** (viewpoint, tipo, default): il gradino annotazione
+sparisce per cancellazione, senza convertitore né migrazione (nessun progetto usa le `jjodel/*`).
+
+**R-VP-6** (2026-09-03) — **Encoding annotazione congelato**: nessuna nuova chiave `jjodel/*`, per
+nessun motivo. Un prompt che ne avesse bisogno si ferma e colloca secondo R-VP-1.
+
+**R-VP-7** (2026-09-03) — **Nessun vincolo di major**: sezione manager additiva senza bump; tipi
+raffinati con bump `DState.version.n` come per TextStyle; rimozione senza migrazione.
+
+**R-VP-8** (2026-09-03) — **Perimetro della customizzazione della form del manager**: scegliere quali
+campi, in che ordine, in quali sezioni, con quale renderer e quale label; mai disegnare la griglia
+(regola FL intatta: nessuna larghezza per campo). Forma: override per host dentro lo stesso
+`FormSpec`; il base `FormSpec` si estende con `order`, `labels`, `hidden`. «Quali campi» passa per
+`hidden` esplicito, mai per omissione: R-FRM-1 (i compartimenti ordinano e intitolano, non filtrano,
+addendum FormSpec `:102`) resta intatta. Customizzazione di sessione dell'utente fuori dall'IR.
+
+**R-VP-9** (2026-09-03) — **Il rung 0 del manager è la slice 1b.** `instanceTable.ts` passa alla
+ladder il solo `rendererOverride`, mai `viewRenderer`: `hosts.manager.widgets` vale per la form del
+drawer soltanto, dichiarato nel tipo. Portare il rung 0 alla tabella è una slice a sé, con il
+renderer risolto per classe passato come parametro e `instanceTable.ts` puro.
+
+**R-VP-10** (2026-09-03) — **`ManagerSpec` è solo `columns`.** Niente `sort` (nel manager non esiste
+ordinamento: sarebbe funzionalità nuova). `columns` ordina e porta in testa; le non citate seguono
+nell'ordine di oggi e restano visibili. Nascondere resta il canale unico di sessione.
+
+**R-VP-11** (2026-09-03) — **Quale view porta `manager`**: solo le view senza `predicate`, per
+specificità decrescente come `resolveIRView`; una con predicato viene ignorata con un
+`console.warn` una volta. Lettura dall'indice (`index.byMetaclass`), senza `irCompile` né
+`CompiledView`.
+
+**R-VP-12** (2026-09-03, **superata da R-DMV-7 il 2026-09-04**) — **Il nome è `hosts`, non `surfaces`.** `VertexViewIR.surface` (Q5,
+R-FORM-3) è ratificata e definitiva; gli host della form (rail, nodo-form, manager) usano la parola
+già in uso nel codice: `FormSpec.hosts?: { manager?: FormHostOverride }`,
+`FormHostOverride = Partial<Omit<FormSpec, 'hosts'>>`. Solo `manager` ammesso in questa slice.
+
+**R-VP-13** (2026-09-03) — **`order` ordina dentro il gruppo strutturale**, riordinando `visible`
+prima di `buildFormSections`; non sposta di sezione, non toglie nessuno; i non citati seguono i
+citati nell'ordine di oggi.
+
+**R-VP-14** (2026-09-04) — **Il Data Manager è l'unico host della form di editing M1.** Fabbisogno
+dichiarato da Alfonso: solo il Data Manager, con la customizzazione della form (come editare ogni
+campo) e la scelta fra temi visuali. La scheda **Form del rail** (`PropertiesWithTreeView.tsx`,
+`inspectorTab`, 2026-08-26) **si toglie per intero**, non si nasconde: il pannello Properties
+classico resta l'unico rendering del rail. Conseguenze: `hosts.manager` (R-VP-12) resta nel tipo
+ma non si costruisce più nulla sopra, l'authoring futuro scrive nel `FormSpec` base; `IRForm`,
+`FormHost` e la prop `host` non si toccano in questa rimozione (pulizia a un fronte R-DEAD
+successivo, con misura). Prompt: `docs/prompts/claude_2026-09-04_1509_prompt_rail_form_tab_removal.md`.
+
+
+## Serie R-DMV — il Data Manager Viewpoint singleton (ratifiche 2026-09-04)
+
+Memo: `docs/ratifiche/claude_2026-09-04_1545_memo_ratifica_data_manager_viewpoint.md`.
+Supera R-VP-3 e R-VP-12 (spostate in «Superate»); conferma R-VP-14.
+
+**R-DMV-1** (2026-09-04) — **Un solo Data Manager Viewpoint per progetto**, `DViewPoint` builtin:
+non si crea da «New viewpoint», non si duplica, non si cancella, non compare tra le sintassi del
+canvas e il canvas non lo apre. Il Data Manager legge sempre da lui, mai da `state.viewpoint`.
+
+**R-DMV-2** (2026-09-04) — **I viewpoint diagrammatici sono solo sintassi concreta.** Il loro
+`form.widgets` resta perché governa le righe del nodo (rung 0); nessuna sezione del manager vi
+appartiene più.
+
+**R-DMV-3** (2026-09-04) — **Le view del singleton sono view di classe senza `shape`**: colonne
+della tabella e `form` del drawer, con le sezioni già esistenti (`widgets`, `order`, `labels`,
+`hidden`, `basic`, `theme`). Il nome della chiave delle colonne (`manager` oggi) si decide nella
+discovery prima che un progetto la scriva (R-B9).
+
+**R-DMV-3-bis** (2026-09-04) — **La «view senza `shape`» di R-DMV-3 vale come intento, non come
+assenza letterale.** Le view di classe del singleton portano la **shape minima
+`{ form: 'rect' }`**. Misurato il 2026-09-04: un ir `vertex` privo di `shape` fa lanciare
+`compileView` (`irCompile.ts:305`, `Cannot read properties of undefined (reading 'form')`),
+`getIRIndex` scarta la view con `[ir] compile failed` e l'indice torna `null` — la view
+sparirebbe dall'indice invece di essere una view senza simbolo. Quella shape non disegna mai:
+il singleton non e' mai `state.viewpoint` e resta `isExclusiveView: true`, quindi le sue view
+non raggiungono ne' il canvas IR ne' quello classico. Rendere `shape` opzionale su
+`VertexViewIR` e' un cambio di interfaccia esportata (regola 11) piu' un cambio del compilatore:
+**fuori corsia**, da valutare a un fronte suo.
+
+**R-DMV-4** (2026-09-04) — **Rail del singleton**: Form theme (già in `ViewpointProperties`) e
+un editor per classe dei widget per campo, solo widget compatibili col tipo, che scrive
+`form.widgets` nella view di classe del singleton creandola se manca. Colonne, ordine, label e
+nascosti nello stesso pannello in una slice successiva.
+
+**R-DMV-5** (2026-09-04) — **Sidebar**: sotto «Data Manager» solo le classi che deviano dal
+default, e sotto ciascuna le feature toccate con l'override accanto, più «columns» quando
+l'ordine è fissato; stato vuoto dichiarato; una view svuotata si pota (`pruneForm` esteso alle
+chiavi nuove) e la classe sparisce.
+
+**R-DMV-6** (2026-09-04) — **Materializzazione alla prima scrittura**, nessuna migrazione: il
+default implicito di R-VP-4 copre tutto finché nulla è personalizzato. Un tema e un set di
+override per progetto.
+
+**R-DMV-7** (2026-09-04) — **`hosts.manager` e `FormHostOverride` sono morti**: restano nel tipo
+finché un fronte R-DEAD non li toglie con misura; nessun progetto li porta.
+
+
+## Serie R-SKIN — le skin della form del Data Manager (ratifiche 2026-09-04)
+
+Memo: `docs/ratifiche/claude_2026-09-04_2302_memo_ratifica_form_skins.md`.
+
+**R-SKIN-1** (2026-09-04) — **Una skin è un preset chiuso di ASPETTO**, ortogonale al tema di layout
+(FL2, tre campi): rimappa i token della form già in uso, non introduce proprietà CSS nuove, non offre
+nulla di customizzabile all'utente (né colori né slider). Registro chiuso in `jjform/skins.ts`, zero
+import, a specchio di `themes.ts`.
+
+**R-SKIN-2** (2026-09-04) — **Catalogo: `Slate`, `Paper`, `Ink`, `Mist`**, quattro e non più. `Slate`
+è l'aspetto di oggi ed è il default: nessun progetto cambia. Ogni preset completo in light e dark.
+
+**R-SKIN-3** (2026-09-04) — **Meccanica**: `data-skin` sulla radice `.ir-form` accanto ai tre `data-*`
+del tema; rimappature in `styles/tokens/` (regola 28), mai nei componenti; nome persistito come
+stringa su `formSkin?` del singleton Data Manager Viewpoint (additivo, nessuna migrazione, R-DMV-6);
+select nel pannello del singleton sotto Form theme.
+
+**R-SKIN-3-bis** (2026-09-04, dopo il referto `discovery_2026-09-04_form_skins.md`) — **Emendamenti**:
+(a) il vocabolario è `palette`, non `skin` (`FormPaletteName`, `formPalette`, `data-palette`,
+`jjform/palettes.ts`, etichetta «Palette» nel pannello): la parola «skin» è già presa in questi stessi
+file (`LegacySkin`, `LEGACY_SKIN_PRESET`, `ir-form--plain`); la serie resta R-SKIN come nome storico.
+(b) `data-palette` va sulla radice `.instance-manager`, non su `.ir-form`: la tabella legge gli stessi
+nove token (143 righe in `instanceManagerTab.scss`) e sta sulla stessa schermata del drawer; una
+scrittura copre entrambi. (c) `--radius-sm` è fuori dalla lista: alias globale, una palette parla di
+colore. (d) La tabella token × palette del referto §9 è la bozza di partenza; i valori si calibrano a
+schermo, light e dark, all'HARD STOP della slice B.
+
+**R-SKIN-4** (2026-09-04) — **Le skin per view di `irTypes.ts`** (`plain | card | compact | inspector`)
+non si toccano: sono literal definitivi (R-B9) rimappati su preset di layout, un'altra cosa con un
+nome simile. La riconciliazione resta il debito FL4 già registrato in `themes.ts`.
 
 
 ## Superate

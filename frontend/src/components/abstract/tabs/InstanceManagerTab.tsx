@@ -53,6 +53,8 @@ import {
 } from '../../editor-v2/hooks/deleteAdapter';
 import IRForm from '../../editor-v2/viewpoint/ir/IRForm';
 import { autoLayoutRows, inputFromDraftField } from '../../editor-v2/viewpoint/ir/formAutoLayout';
+import { computeIRSignature, getIRIndex } from '../../editor-v2/viewpoint/ir/irResolveCore';
+import { resolveTableSpec } from '../../editor-v2/viewpoint/ir/tableViews';
 import { EmptyState } from '../../ui';
 import type { RendererDecision } from '../../editor-v2/nodes/valueRenderer';
 import type {
@@ -126,6 +128,7 @@ import {
     filterBySegment,
     filterRowsByName,
     mostPopulatedClassId,
+    orderColumns,
     pageCount,
     pageOf,
     shownColumnsWith,
@@ -139,7 +142,8 @@ import {
 } from './instanceTable';
 import { entityLetter } from '../../../common/entityMeta';
 import { saveProjectWithFeedback } from '../../../common/libraries/saveProject';
-import { LProject, U } from '../../../joiner';
+import { DATA_MANAGER_VIEWPOINT_ID, LProject, U } from '../../../joiner';
+import { paletteAttr } from '../../../jjform';
 import './instanceManagerTab.scss';
 
 /** La lettera del badge di metaclasse, dal registro delle entita' e non da una
@@ -1498,7 +1502,85 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
         [shapeCtx, selectedClass],
     );
 
-    const columns = useMemo(() => (classShape ? tableColumns(classShape) : []), [classShape]);
+    /**
+     * La `table` della metaclasse, dalla view della R-VP-11.
+     *
+     * REGOLA DI RISOLUZIONE (R-VP-11), che e' l'unica cosa non ovvia qui. Le colonne sono
+     * della METACLASSE, ma una view si risolve su un OGGETTO: `resolveIRView` prende un
+     * `objectId` perche' il `predicate` si valuta su un soggetto, e una tabella di
+     * soggetti ne ha tanti quante le righe. Si guardano quindi le sole view SENZA
+     * predicato, per priorita' / specificita' / ordine di dichiarazione — lo stesso
+     * ordine di `resolveIRView`, `compareCandidates` condiviso e non ricopiato. Una view
+     * che porta `table` E un predicato viene saltata, e detta: ignorarla in silenzio
+     * lascerebbe l'autore davanti a una chiave scritta che non fa niente.
+     *
+     * L'indice arriva da una `useSelector` a se'. Restituisce un oggetto e non una
+     * stringa, ma il riferimento e' STABILE: `getIRIndex` e' memoizzata sulla firma
+     * (`indexCache`), quindi finche' le view non cambiano il selector rende lo stesso
+     * oggetto e non ri-renderizza. E' la stessa ragione per cui la firma si calcola
+     * dentro il selector invece che fuori: e' l'unica cosa che deve essere ricalcolata
+     * a ogni dispatch.
+     *
+     * DA QUALE VIEWPOINT (R-DMV-1): dal singleton del Data Manager, MAI da
+     * `state.viewpoint`. Le colonne della tabella sono una configurazione della tabella,
+     * non la sintassi concreta di un diagramma, e non devono cambiare quando l'utente
+     * cambia sintassi sul canvas. Finche' il singleton non esiste — cioe' in ogni
+     * progetto salvato fino a oggi — la firma e' vuota, l'indice e' `null` e
+     * `resolveTableSpec` restituisce `NOTHING`: la tabella resta sul default derivato dal
+     * tipo, che e' R-VP-4 e non un caso degenere.
+     */
+    const irIndex = useSelector((state: any) => getIRIndex(
+        state,
+        computeIRSignature(state, DATA_MANAGER_VIEWPOINT_ID),
+        DATA_MANAGER_VIEWPOINT_ID,
+    ));
+
+    /**
+     * La PALETTE, dal singleton (R-SKIN), scritta sulla radice come `data-palette`.
+     *
+     * QUI e non su `.ir-form`: la tabella legge gli stessi nove token della form — 143
+     * righe di `instanceManagerTab.scss`, `--color-form-muted` da solo 44 volte — e questa
+     * radice e' antenata della `.ir-form` che il drawer monta. Una scrittura, due superfici.
+     * Sull'altra radice la form cambierebbe aspetto e la tabella sopra di essa no, sulla
+     * stessa schermata (R-SKIN-3-bis (b)).
+     *
+     * `paletteAttr` non restituisce mai vuoto: senza singleton, senza campo, o con un nome
+     * che questa versione non conosce, l'attributo e' `slate`, che nel foglio di stile non
+     * matcha nessuna regola ed e' quindi l'aspetto di oggi. E' la ragione per cui nessun
+     * progetto salvato cambia (R-SKIN-2) senza che il default sia scritto una seconda volta.
+     *
+     * Un `useSelector` a se', che rende una STRINGA: il valore cambia quando qualcuno sceglie
+     * una palette, non a ogni scrittura sul modello, e una stringa non ri-renderizza finche'
+     * resta uguale a se stessa. Stessa forma del rung del tema in `IRForm`.
+     */
+    const palette = useSelector((state: any) =>
+        paletteAttr(state?.idlookup?.[DATA_MANAGER_VIEWPOINT_ID]?.formPalette));
+    const managerResolution = useMemo(
+        () => (selectedClassId
+            ? resolveTableSpec(selectedClassId, irIndex, idlookup)
+            : { spec: null, skippedPredicated: [] as string[] }),
+        [selectedClassId, irIndex, idlookup],
+    );
+
+    /** Un avviso per metaclasse, non per render: le view saltate sono una proprieta'
+     *  della coppia (classe, firma dell'indice), e ripeterlo a ogni disegno riempirebbe
+     *  la console senza aggiungere un fatto. */
+    useEffect(() => {
+        for (const viewId of managerResolution.skippedPredicated) {
+            console.warn(
+                `[table] view ${viewId} declares \`table\` and a \`predicate\`: ignored. `
+                + 'Columns are per metaclass, a predicate selects per instance (R-VP-11).',
+            );
+        }
+    }, [managerResolution]);
+
+    const columns = useMemo(
+        // `orderColumns` PRIMA di `hiddenColumnKeys`, non dopo: e' una permutazione e non
+        // un filtro, quindi la riduzione automatica misura lo stesso insieme di prima e
+        // il canale unico che il commento qui sotto pretende resta uno.
+        () => orderColumns(classShape ? tableColumns(classShape) : [], managerResolution.spec),
+        [classShape, managerResolution],
+    );
 
     const rows: TableRow[] = useMemo(() => {
         if (!classShape || !selectedClassId) return [];
@@ -2115,7 +2197,7 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
     };
 
     return (
-        <div className="instance-manager">
+        <div className="instance-manager" data-palette={palette}>
             {/* ── L'outline di containment (10b) ──────────────────────────────
                 Quarta colonna, la prima da sinistra: AFFIANCA il catalogo, non lo
                 sostituisce. «Outline per il dove, tabella per il quanto» — la nota
@@ -2951,7 +3033,7 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
                             </div>
                         </header>
 
-                        <IRForm objectId={formSubjectId ?? subjectId} />
+                        <IRForm objectId={formSubjectId ?? subjectId} host="manager" />
 
                         {/* The depth rule of 12c, and it is ONE comparison:
                             `rendersInline(formDepth)`. At depth 0 a contained child is
@@ -2985,7 +3067,7 @@ export function InstanceManagerTab({ modelid }: InstanceManagerTabProps) {
                                                         {crumbLabel(navStepOf(idlookup, childId) ?? { id: childId, name: '', cls: slot.of, childKey: null })}
                                                         <i className="bi bi-box-arrow-in-right" aria-hidden="true" />
                                                     </button>
-                                                    <IRForm objectId={childId} />
+                                                    <IRForm objectId={childId} host="manager" />
                                                 </div>
                                             ) : (
                                                 <button

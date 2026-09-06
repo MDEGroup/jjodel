@@ -2,7 +2,8 @@ import {
     Any,
     DAttribute, DClass, DEnumerator, Dictionary, DModel, DocString, DReference,
     DPackage, DState, DViewElement, DViewPoint,
-    Input, LAttribute, LClass, LClassifier, LEnumerator,
+    DATA_MANAGER_VIEWPOINT_ID,
+    Input, isDataManagerViewpoint, LAttribute, LClass, LClassifier, LEnumerator,
     LGraphElement,
     LModel,
     LModelElement,
@@ -12,6 +13,7 @@ import {
 } from '../../joiner';
 import { ViewData } from './views/ViewData';
 import ViewpointProperties from './viewpoint/properties/ViewpointProperties';
+import DataManagerViewpointPanel from './viewpoint/properties/DataManagerViewpointPanel';
 import {FakeStateProps, int, windoww} from '../../joiner/types';
 
 import JsonViewer from '../shared/JsonViewer';
@@ -1370,6 +1372,27 @@ function InfoComponent(props: AllProps) {
     // - DViewElement → ViewData (Apply to / Template / Style / Events / Options sub-tabs)
     const selectedView = props.view;
     const selectedViewClass = (selectedView as any)?.__raw?.className || (selectedView as any)?.className;
+
+    // The Data Manager singleton, and its STUB. The sidebar entry points `_lastSelected.view`
+    // at the fixed pointer whether or not the object exists (R-DMV-6): with the object, the
+    // branch below would have caught it anyway; without it, `props.view` resolves to a proxy
+    // with no `__raw` and the class test is silent. Reading the raw id is what tells the two
+    // apart, and the panel renders the same in both cases — the first write materializes.
+    const isDataManagerSelection = props.viewId === DATA_MANAGER_VIEWPOINT_ID
+        || isDataManagerViewpoint((selectedView as any)?.__raw ?? (selectedView as any));
+    if (tab && isDataManagerSelection) {
+        return (
+            <section className="properties-tab properties-panel">
+                <DataManagerViewpointPanel
+                    key={DATA_MANAGER_VIEWPOINT_ID}
+                    viewpoint={(selectedViewClass === DViewPoint.cname
+                        ? (selectedView as unknown as LViewPoint)
+                        : null)}
+                    readOnly={false}
+                />
+            </section>
+        );
+    }
     if (tab && selectedView && (selectedViewClass === DViewPoint.cname || selectedViewClass === DViewElement.cname)) {
         const isVP = selectedViewClass === DViewPoint.cname;
         const clearSelection = () => {
@@ -1600,6 +1623,10 @@ interface OwnProps {
 interface StateProps {
     node?: LGraphElement
     view?: LViewElement
+    /** The RAW selected view pointer. `view` above resolves it to a proxy, which cannot
+     *  tell «no selection» from «selected an id that does not exist» — and the Data Manager
+     *  stub (R-DMV-6) is exactly the second case. */
+    viewId?: string
     data?: LModelElement
     topics: Dictionary<string, unknown>
     advanced: boolean
@@ -1621,6 +1648,7 @@ function mapStateToProps(state: DState, ownProps: OwnProps): StateProps {
     const dataID = sel ? sel.modelElement : state._lastSelected?.modelElement;
     if (nodeID) ret.node = LGraphElement.fromPointer(nodeID);
     if (viewID) ret.view = LViewElement.fromPointer(viewID);
+    if (viewID) ret.viewId = viewID;
     if (dataID) ret.data = LModelElement.fromPointer(dataID);
     ret.topics = state.topics;
     ret.advanced = state.advanced;

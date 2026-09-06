@@ -253,6 +253,16 @@ export type {
     SectionStyle,
 } from './themes';
 
+export type { FormPalette, FormPaletteName } from './palettes';
+
+export {
+    FORM_PALETTE_DEFAULT_NAME,
+    FORM_PALETTE_NAMES,
+    FORM_PALETTE_PRESETS,
+    isFormPaletteName,
+    paletteAttr,
+} from './palettes';
+
 export {
     DENSITY_SCALE,
     FORM_THEME_DEFAULT,

@@ -337,6 +337,40 @@ export interface ExecutionStats {
 // EXECUTOR CLASS
 // ============================================
 
+/** A feature (attribute or reference) of a target metamodel class. */
+interface TargetFeatureInfo {
+    name: string;
+    isReference: boolean;
+    /** Name of the referenced class; references only. */
+    typeName?: string;
+    composition?: boolean;
+}
+
+/** A class of the target metamodel, indexed by name. */
+interface TargetClassInfo {
+    name: string;
+    isAbstract?: boolean;
+    superNames: string[];
+    features: Map<string, TargetFeatureInfo>;
+}
+
+/**
+ * What an `AttributeMapping` carrying an `objectCreation` actually means.
+ *
+ * The parser produces two shapes for the same node. `-> feature { -> Class {} }`
+ * yields `targetAttribute = feature`, `objectCreation.targetClass = Class`;
+ * `-> feature { forall ... }` falls into the "nested mapping body" branch and
+ * yields `targetClass = feature`, with the real creations inside the body. The
+ * feature name is `targetAttribute` in BOTH, which is why placement never needs
+ * the metamodel — only validation does.
+ */
+type CreationShape =
+    | { kind: 'featureCreation'; featureName: string; className: string }
+    | { kind: 'featureForAll'; featureName: string }
+    | { kind: 'ruleLevelClass'; className: string }
+    | { kind: 'unknownFeature'; featureName: string }
+    | { kind: 'unsupportedBody'; featureName: string };
+
 export class JjtlExecutor {
     private ast: TransformationAST;
     private context!: ExecutionContext;
@@ -352,6 +386,11 @@ export class JjtlExecutor {
     // model. Populated lazily when executeClassMapping sees them; kept so we
     // don't emit the same warning per-rule for the same missing class.
     private warnedSourceClasses: Set<string> = new Set();
+    // Target metamodel indexed by class name: features (attributes + references)
+    // and supertypes. Empty when no target metamodel was handed over — every
+    // lookup then returns undefined and the executor keeps its unvalidated
+    // behaviour, which is what most unit tests exercise.
+    private targetClasses: Map<string, TargetClassInfo> = new Map();
     private stats: ExecutionStats = {
         sourceInstancesProcessed: 0,
         targetInstancesCreated: 0,
@@ -435,7 +474,9 @@ export class JjtlExecutor {
             // Get all source instances from the COPY
             const sourceInstances = this.extractSourceInstances(sourceModelCopy);
 
-            // Validate target classes (e.g. reject abstract targets)
+            // Index the target metamodel (classes + features), then validate
+            // target classes (e.g. reject abstract targets)
+            this.buildTargetClassIndex();
             this.validateTargetClasses();
 
             // If validation errors, return early
@@ -512,15 +553,14 @@ export class JjtlExecutor {
     }
 
     /**
-     * Validate target classes in all mappings.
-     * Rejects abstract classes as transformation targets.
+     * Collect the class elements of the target metamodel, whatever shape it
+     * arrives in: an array, an LModel-like object with `.classes`, or a tree
+     * with `.children`. Shared by validateTargetClasses and the feature index.
      */
-    private validateTargetClasses(): void {
+    private collectTargetClassElements(): any[] {
         const tm = this.context.targetMetamodel;
-        if (!tm) return;
-
-        // Extract all classes from target metamodel
-        const allClasses: Array<{ name: string; isAbstract?: boolean }> = [];
+        if (!tm) return [];
+        const allClasses: any[] = [];
         const traverse = (el: any) => {
             if (el?.type === 'class' || el?.className === 'DClass') {
                 allClasses.push(el);
@@ -534,6 +574,106 @@ export class JjtlExecutor {
         } else if (tm?.classes && Array.isArray(tm.classes)) {
             tm.classes.forEach((el: any) => traverse(el));
         }
+        return allClasses;
+    }
+
+    /**
+     * Index the target metamodel by class name, with the features of each class.
+     *
+     * This is what makes `-> feature { ... }` resolvable: a feature name is looked
+     * up here and never validated as a class. Reads both the L-layer accessors
+     * (`allAttributes`, `allReferences`, `allSuperClasses` on an LClass proxy) and
+     * the plain-object shape used by tests (`attributes`, `references`, `extends`).
+     */
+    private buildTargetClassIndex(): void {
+        this.targetClasses = new Map();
+        const nameOf = (v: any): string | undefined => {
+            if (!v) return undefined;
+            if (typeof v === 'string') return v;
+            return typeof v.name === 'string' ? v.name : undefined;
+        };
+        for (const el of this.collectTargetClassElements()) {
+            const className = nameOf(el);
+            if (!className) continue;
+            const features = new Map<string, TargetFeatureInfo>();
+            const attrs: any[] = el.allAttributes || el.attributes || [];
+            for (const a of attrs) {
+                const n = nameOf(a);
+                if (n) features.set(n, { name: n, isReference: false });
+            }
+            const refs: any[] = el.allReferences || el.references || [];
+            for (const r of refs) {
+                const n = nameOf(r);
+                if (!n) continue;
+                features.set(n, {
+                    name: n,
+                    isReference: true,
+                    typeName: nameOf(r.type),
+                    composition: !!(r.composition || r.containment),
+                });
+            }
+            const supers: any[] = el.allSuperClasses || el.superclasses || el.extends || [];
+            const superNames = supers.map(nameOf).filter((n): n is string => !!n && n !== className);
+            this.targetClasses.set(className, {
+                name: className,
+                isAbstract: !!el.isAbstract,
+                superNames,
+                features,
+            });
+        }
+    }
+
+    /** True when the target metamodel is known well enough to validate against. */
+    private hasTargetClassIndex(): boolean { return this.targetClasses.size > 0; }
+
+    /** A feature (attribute or reference) of `className`, or undefined. */
+    private resolveTargetFeature(className: string, featureName: string): TargetFeatureInfo | undefined {
+        return this.targetClasses.get(className)?.features.get(featureName);
+    }
+
+    /** `className` itself or any of its (transitive) supertypes equals `ancestorName`. */
+    private classIsOrExtends(className: string, ancestorName: string): boolean {
+        if (className === ancestorName) return true;
+        const seen = new Set<string>();
+        const stack = [...(this.targetClasses.get(className)?.superNames || [])];
+        while (stack.length) {
+            const n = stack.pop()!;
+            if (n === ancestorName) return true;
+            if (seen.has(n)) continue;
+            seen.add(n);
+            stack.push(...(this.targetClasses.get(n)?.superNames || []));
+        }
+        return false;
+    }
+
+    /**
+     * The feature of `ownerClassName` that can hold instances of `createdClassName`
+     * — used by a rule-level `forall ... -> Class { ... }`, which names no feature.
+     * Returns the reference only when EXACTLY ONE matches: with none or several the
+     * caller falls back to the pluralization heuristic and says so.
+     */
+    private findFeatureForCreatedClass(
+        ownerClassName: string, createdClassName: string
+    ): TargetFeatureInfo | undefined {
+        const info = this.targetClasses.get(ownerClassName);
+        if (!info) return undefined;
+        const matches: TargetFeatureInfo[] = [];
+        for (const f of info.features.values()) {
+            if (!f.isReference || !f.typeName) continue;
+            if (this.classIsOrExtends(createdClassName, f.typeName)) matches.push(f);
+        }
+        return matches.length === 1 ? matches[0] : undefined;
+    }
+
+    /**
+     * Validate target classes in all mappings.
+     * Rejects abstract classes as transformation targets.
+     */
+    private validateTargetClasses(): void {
+        const tm = this.context.targetMetamodel;
+        if (!tm) return;
+
+        const allClasses: Array<{ name: string; isAbstract?: boolean }> = this.collectTargetClassElements();
 
         const classMap = new Map(allClasses.map(c => [c.name, c]));
         const knownNames = new Set(classMap.keys());
@@ -553,7 +693,7 @@ export class JjtlExecutor {
         };
 
         // Check class mappings
-        const checkTarget = (targetClass: string, context: string) => {
+        const checkTarget = (targetClass: string, context: string, skipsMapping: boolean = false) => {
             if (abstractNames.has(targetClass)) {
                 const concrete = findConcreteSubclasses(targetClass);
                 const suggestion = concrete.length > 0
@@ -563,7 +703,11 @@ export class JjtlExecutor {
                     `Cannot use abstract class '${targetClass}' as transformation target in ${context}.${suggestion}`
                 );
             } else if (!knownNames.has(targetClass)) {
-                const msg = `Target class '${targetClass}' not found in target metamodel (${context}). Mapping skipped.`;
+                // "Mapping skipped" is only true for a RULE target: unknownTargetClasses
+                // is consulted by pass1CreateTargets and nowhere else. For a nested
+                // creation nothing was ever skipped, so the message must not say so.
+                const msg = `Target class '${targetClass}' not found in target metamodel (${context}).`
+                    + (skipsMapping ? ' Mapping skipped.' : ' Nothing is created for it.');
                 console.warn(`[JjTL] ${msg}`);
                 this.warnings.push(msg);
                 this.unknownTargetClasses.add(targetClass);
@@ -579,20 +723,111 @@ export class JjtlExecutor {
                     }
                 }
                 if (item.type === 'AttributeMapping' && item.objectCreation) {
-                    checkTarget(item.objectCreation.targetClass, `object creation in ${parentContext}`);
+                    // `-> feature { ... }`: the feature name is resolved against the
+                    // target metamodel and NEVER validated as a class. Only the class
+                    // created inside the wrapper is checked against the class names.
+                    const shape = this.classifyCreation(item as AttributeMappingAST, parentContext);
+                    switch (shape.kind) {
+                        case 'featureCreation':
+                            checkTarget(shape.className, `object creation in ${parentContext}.${shape.featureName}`);
+                            break;
+                        case 'featureForAll':
+                            // the forall inside the wrapper is checked by the recursion below
+                            break;
+                        case 'ruleLevelClass':
+                            this.errors.push(
+                                `Object creation must be nested in a feature: write ` +
+                                `'-> feature { -> ${shape.className} { ... } }' in '${parentContext}', ` +
+                                `not '-> ${shape.className} { ... }'. ` +
+                                `A bare class creation has no feature to be stored in.`
+                            );
+                            break;
+                        case 'unknownFeature':
+                            this.warnings.push(
+                                `Feature '${shape.featureName}' not found on target class '${parentContext}' ` +
+                                `(object creation). Nothing is created for it.`
+                            );
+                            break;
+                        case 'unsupportedBody':
+                            this.warnings.push(
+                                `'-> ${shape.featureName} { ... }' in '${parentContext}' contains neither ` +
+                                `'-> Class { ... }' nor 'forall ... -> Class { ... }'. Nothing is created for it.`
+                            );
+                            break;
+                    }
                     if (item.objectCreation.body) {
-                        checkBody(item.objectCreation.body, item.objectCreation.targetClass);
+                        checkBody(item.objectCreation.body, shape.kind === 'featureCreation'
+                            ? shape.className
+                            : parentContext);
                     }
                 }
             }
         };
 
         for (const mapping of this.ast.mappings) {
-            checkTarget(mapping.targetClass, `${mapping.sources.map(s => s.className).join(', ')} -> ${mapping.targetClass}`);
+            checkTarget(mapping.targetClass, `${mapping.sources.map(s => s.className).join(', ')} -> ${mapping.targetClass}`, true);
             if (mapping.body) {
                 checkBody(mapping.body, mapping.targetClass);
             }
         }
+    }
+
+    /**
+     * Decide what an `AttributeMapping` carrying an `objectCreation` means, given
+     * the class of the instance it is written on. See CreationShape.
+     *
+     * The discriminator between the two parser shapes is `targetClass === targetAttribute`,
+     * which the "nested mapping body" branch always produces. It is ambiguous in exactly
+     * one case — a feature whose name equals the class it holds, written as
+     * `-> Column { -> Column { ... } }` — which lands on 'unsupportedBody' and says so
+     * rather than failing silently.
+     */
+    private classifyCreation(mapping: AttributeMappingAST, ownerClassName: string): CreationShape {
+        const creation = mapping.objectCreation!;
+        const featureName = mapping.targetAttribute;
+        const wrapperIsFallback = creation.targetClass === featureName;
+        const hasNestedForAll = (creation.body || []).some((i: any) => i?.type === 'ForAllMapping');
+
+        if (!wrapperIsFallback) {
+            if (this.hasTargetClassIndex() && !this.resolveTargetFeature(ownerClassName, featureName)) {
+                return { kind: 'unknownFeature', featureName };
+            }
+            return { kind: 'featureCreation', featureName, className: creation.targetClass };
+        }
+        if (hasNestedForAll) {
+            return { kind: 'featureForAll', featureName };
+        }
+        // A wrapper with a plain body. With the metamodel known we can tell a
+        // rule-level `-> Class { ... }` (D2: an error) from an unsupported wrapper.
+        if (this.hasTargetClassIndex()
+            && !this.resolveTargetFeature(ownerClassName, featureName)
+            && this.targetClasses.has(featureName)) {
+            return { kind: 'ruleLevelClass', className: featureName };
+        }
+        if (this.hasTargetClassIndex() && !this.resolveTargetFeature(ownerClassName, featureName)) {
+            return { kind: 'unknownFeature', featureName };
+        }
+        return { kind: 'unsupportedBody', featureName };
+    }
+
+    /**
+     * Dereference a `{ __ref: id }` wrapper to the SOURCE object it names.
+     *
+     * ProjectEditor serializes every reference value as `{ __ref: pointerId }`, so
+     * iterating a reference collection (`forall a in ownedAttributes`) handed the body
+     * the wrapper instead of the object and `a.name` read undefined. This resolves the
+     * pointer against the source array — possible now that contained instances are
+     * enumerated. Unrelated to `resolveValue`, which resolves the same wrapper the
+     * other way, source to TARGET, through the trace.
+     */
+    private derefSourceRef(value: any): any {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+        const ref = (value as any).__ref;
+        if (typeof ref !== 'string') return value;
+        const arr = Array.isArray(this.context?.sourceModel) ? this.context.sourceModel : null;
+        if (!arr) return value;
+        const found = arr.find((o: any) => o && o.id === ref);
+        return found !== undefined ? found : value;
     }
 
     /**
@@ -1242,7 +1477,12 @@ export class JjtlExecutor {
             const expressionSource = hasExpression ? this.getExpressionSource(mapping.conversion!.expression!) : undefined;
 
             if (mapping.objectCreation) {
-                value = await this.executeObjectCreation(mapping.objectCreation, sourceInstance);
+                const created = await this.executeCreationMapping(mapping, sourceInstance, targetInstance);
+                traceLink.addBinding(
+                    null, mapping.targetAttribute, undefined, null,
+                    created === undefined ? null : created, false, undefined, undefined
+                );
+                return;
             } else if (mapping.expression !== undefined) {
                 // New := syntax: evaluate expression, optionally apply value mapping
                 const ctx = this.createInstanceContext(sourceInstance, alias);
@@ -1441,9 +1681,10 @@ export class JjtlExecutor {
             let value: JjelValue;
 
             if (mapping.objectCreation) {
-                // Handle object creation: -> Arc { ... }
-                // console.log('[JjTL Executor] Handling object creation');
-                value = await this.executeObjectCreation(mapping.objectCreation, sourceInstance);
+                // Object creation is placed into a FEATURE of the enclosing target
+                // instance, which executeCreationMapping resolves and writes itself.
+                await this.executeCreationMapping(mapping, sourceInstance, targetInstance);
+                return;
             } else if (mapping.expression !== undefined) {
                 // New := syntax: evaluate expression, optionally apply value mapping
                 // console.log('[JjTL Executor] New := syntax, expression type:', mapping.expression.type);
@@ -1490,6 +1731,17 @@ export class JjtlExecutor {
     }
 
     /**
+     * Apply value-mapping pairs to an already evaluated value.
+     * `type := a.type : String=VARCHAR, Integer=INTEGER` — with no match the value
+     * passes through, which is what the pairs-only form does too.
+     */
+    private applyValueMappings(value: JjelValue, pairs?: ValueMappingAST[]): JjelValue {
+        if (!pairs || pairs.length === 0) return value;
+        const match = pairs.find(vm => this.valuesEqual(value, this.getLiteralValue(vm.sourceValue)));
+        return match ? this.getLiteralValue(match.targetValue) : value;
+    }
+
+    /**
      * Execute a conversion (value mappings or expression)
      */
     private async executeConversion(
@@ -1517,7 +1769,10 @@ export class JjtlExecutor {
             // });
             const result = await this.evaluateExpressionAsync(conversion.expression, ctx);
             // console.log('[JjTL Executor] Expression result:', result);
-            return result;
+            // `-> type : a.type : String=VARCHAR, Integer=INTEGER` — the pairs apply
+            // to the expression result. Both fields of ConversionAST are populated in
+            // that form; with no match the expression result passes through.
+            return this.applyValueMappings(result, conversion.mappings);
         }
 
         if (conversion.mappings && conversion.mappings.length > 0) {
@@ -1544,6 +1799,171 @@ export class JjtlExecutor {
     }
 
     /**
+     * Execute an object creation written as `-> feature { ... }` and place the
+     * result in that feature of the enclosing target instance.
+     *
+     * Two forms are legal inside the wrapper (SPEC §3.3):
+     *   -> feature { -> Class { ... } }                       one object
+     *   -> feature { forall v in expr -> Class { ... } }      one object per element
+     *
+     * Placement never needs the target metamodel — the feature name is on the
+     * AttributeMapping in both parser shapes. The metamodel is consulted only to
+     * tell a misplaced rule-level `-> Class { ... }` from a real feature, and to
+     * name the reason in a warning instead of dropping the value in silence.
+     *
+     * @returns the value written into the feature, or undefined when nothing was.
+     */
+    private async executeCreationMapping(
+        mapping: AttributeMappingAST,
+        sourceInstance: any,
+        targetInstance: any,
+    ): Promise<any> {
+        const ownerClassName = targetInstance?.__type || targetInstance?.className || '';
+        const shape = this.classifyCreation(mapping, ownerClassName);
+        const ruleContext = `${ownerClassName || 'target'}.${mapping.targetAttribute}`;
+
+        switch (shape.kind) {
+            case 'ruleLevelClass':
+                // validateTargetClasses already pushed the error; write nothing.
+                return undefined;
+
+            case 'unknownFeature':
+                this.warnings.push(
+                    `Feature '${shape.featureName}' not found on target class '${ownerClassName}': ` +
+                    `the objects created by '-> ${shape.featureName} { ... }' have nowhere to go and were dropped.`
+                );
+                return undefined;
+
+            case 'unsupportedBody':
+                this.warnings.push(
+                    `'-> ${shape.featureName} { ... }' (${ruleContext}) contains neither '-> Class { ... }' ` +
+                    `nor 'forall ... -> Class { ... }': nothing was created.`
+                );
+                return undefined;
+
+            case 'featureForAll': {
+                const results: any[] = [];
+                for (const item of mapping.objectCreation!.body || []) {
+                    if (item.type === 'ForAllMapping') {
+                        results.push(...await this.runForAll(item as ForAllMappingAST, sourceInstance));
+                    } else {
+                        this.warnings.push(
+                            `'-> ${shape.featureName} { ... }' (${ruleContext}) mixes a forall with a ` +
+                            `'${item.type}': only the forall produced objects.`
+                        );
+                    }
+                }
+                targetInstance[shape.featureName] = results;
+                return results;
+            }
+
+            case 'featureCreation': {
+                const created = fromJjelValue(
+                    await this.executeObjectCreation(mapping.objectCreation!, sourceInstance)
+                );
+                targetInstance[shape.featureName] = created;
+                return created;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Run a forall and return the created objects, without deciding where they go.
+     *
+     * Each element of the collection is dereferenced first: a reference collection
+     * arrives as `[{ __ref: id }, ...]`, and the body needs the source object.
+     */
+    private async runForAll(
+        forall: ForAllMappingAST,
+        sourceInstance: any,
+        extraBindings?: Record<string, JjelValue>,
+    ): Promise<any[]> {
+        const baseCtx = extraBindings
+            ? this.createInstanceContext(sourceInstance).child(extraBindings)
+            : this.createInstanceContext(sourceInstance);
+        const collectionValue = this.evaluateExpression(forall.collection, baseCtx);
+        const collection = fromJjelValue(collectionValue);
+
+        if (!Array.isArray(collection)) {
+            if (collection != null) {
+                this.warnings.push(`ForAll collection is not an array: ${typeof collection}`);
+            }
+            return [];
+        }
+
+        const results: any[] = [];
+        let unresolvedRefs = 0;
+
+        for (const rawItem of collection) {
+            const item = this.derefSourceRef(rawItem);
+            if (item === rawItem && rawItem && typeof rawItem === 'object'
+                && typeof (rawItem as any).__ref === 'string') {
+                unresolvedRefs++;
+            }
+
+            const itemBindings: Record<string, JjelValue> = {
+                ...(extraBindings || {}),
+                [forall.variable]: shallowToJjelValue(item),
+            };
+            // Also add item properties directly for unqualified access.
+            // Uses proxyEntries to capture L-layer proxy properties.
+            if (item && typeof item === 'object') {
+                for (const [key, value] of proxyEntries(item)) {
+                    if (!key.startsWith('__')) {
+                        itemBindings[key] = shallowToJjelValue(value);
+                    }
+                }
+            }
+            const childCtx = baseCtx.child({ [forall.variable]: shallowToJjelValue(item) });
+
+            if (forall.filter) {
+                const passes = this.evaluateExpression(forall.filter, childCtx);
+                if (!fromJjelValue(passes)) continue;
+            }
+
+            const created = await this.executeObjectCreation(
+                forall.objectCreation, sourceInstance, itemBindings
+            );
+            results.push(fromJjelValue(created));
+        }
+
+        if (unresolvedRefs > 0) {
+            this.warnings.push(
+                `forall ${forall.variable}: ${unresolvedRefs} element(s) of the collection are references ` +
+                `to objects outside the source model and were iterated unresolved ` +
+                `(target of '-> ${forall.objectCreation.targetClass}').`
+            );
+        }
+
+        return results;
+    }
+
+    /**
+     * The feature of `ownerClassName` that receives the objects of a forall which
+     * names none. Falls back to the pluralization heuristic, saying which name it
+     * inferred, so a wrong guess is visible instead of silent.
+     */
+    private resolveForAllFeature(ownerClassName: string, createdClassName: string): string {
+        const byType = ownerClassName
+            ? this.findFeatureForCreatedClass(ownerClassName, createdClassName)
+            : undefined;
+        if (byType) return byType.name;
+
+        const guessed = createdClassName.charAt(0).toLowerCase() + createdClassName.slice(1) + 's';
+        if (this.hasTargetClassIndex() && ownerClassName) {
+            const exists = !!this.resolveTargetFeature(ownerClassName, guessed);
+            this.warnings.push(
+                `forall -> ${createdClassName} in '${ownerClassName}' names no feature: ` +
+                `guessed '${guessed}' by pluralization` +
+                (exists ? '.' : `, which is not a feature of '${ownerClassName}'.`) +
+                ` Write '-> feature { forall ... }' to say it explicitly.`
+            );
+        }
+        return guessed;
+    }
+
+    /**
      * Execute object creation
      */
     private async executeObjectCreation(
@@ -1554,7 +1974,14 @@ export class JjtlExecutor {
         const newObject: Record<string, JjelValue> = {
             __type: creation.targetClass,
             className: creation.targetClass,
+            // Same provenance marker as a rule-level target, plus __nested so the
+            // write-back can tell "an object to create inside a feature" from
+            // "a pointer to a target created by another rule" (__ref_result).
+            __sourceId: sourceInstance?.id || sourceInstance?.name,
+            __createdBy: 'JjTL',
+            __nested: true,
         };
+        this.stats.targetInstancesCreated++;
 
         // Execute nested body items (attribute mappings, forall mappings, and interactive statements)
         for (const item of creation.body) {
@@ -1576,7 +2003,10 @@ export class JjtlExecutor {
                         if (match) value = this.getLiteralValue(match.targetValue);
                     }
                 } else if (attrMapping.conversion?.expression) {
-                    value = await this.evaluateExpressionAsync(attrMapping.conversion.expression, ctx);
+                    value = this.applyValueMappings(
+                        await this.evaluateExpressionAsync(attrMapping.conversion.expression, ctx),
+                        attrMapping.conversion.mappings
+                    );
                 } else if (attrMapping.sourceAttribute) {
                     value = this.evaluatePropertyPath(attrMapping.sourceAttribute, ctx);
                 } else {
@@ -1625,7 +2055,10 @@ export class JjtlExecutor {
                                 if (match) value = this.getLiteralValue(match.targetValue);
                             }
                         } else if (attrMapping.conversion?.expression) {
-                            value = await this.evaluateExpressionAsync(attrMapping.conversion.expression, letCtx);
+                            value = this.applyValueMappings(
+                                await this.evaluateExpressionAsync(attrMapping.conversion.expression, letCtx),
+                                attrMapping.conversion.mappings
+                            );
                         } else if (attrMapping.sourceAttribute) {
                             value = this.evaluatePropertyPath(attrMapping.sourceAttribute, letCtx);
                         } else {
@@ -1644,79 +2077,29 @@ export class JjtlExecutor {
     }
 
     /**
-     * Execute a forall mapping inside a class mapping body.
-     * Creates one object per element and appends results to the target instance.
+     * Execute a forall mapping inside a class mapping body — i.e. one that names
+     * no feature. The created objects go into the feature of the target class that
+     * can hold them, or into the pluralized guess with a warning.
      */
     private async executeForAllMapping(
         forall: ForAllMappingAST,
         sourceInstance: any,
         targetInstance: any
     ): Promise<void> {
-        const ctx = this.createInstanceContext(sourceInstance);
-        const collectionValue = this.evaluateExpression(forall.collection, ctx);
-        const collection = fromJjelValue(collectionValue);
+        const results = await this.runForAll(forall, sourceInstance);
+        if (results.length === 0) return;
 
-        if (!Array.isArray(collection)) {
-            if (collection != null) {
-                this.warnings.push(`ForAll collection is not an array: ${typeof collection}`);
-            }
-            return;
-        }
+        const ownerClassName = targetInstance?.__type || targetInstance?.className || '';
+        const propName = this.resolveForAllFeature(ownerClassName, forall.objectCreation.targetClass);
 
-        const results: any[] = [];
-
-        for (const item of collection) {
-            const itemBindings: Record<string, JjelValue> = {
-                [forall.variable]: shallowToJjelValue(item),
-            };
-            // Also add item properties directly for unqualified access
-            // Uses proxyEntries to capture L-layer proxy properties
-            if (item && typeof item === 'object') {
-                for (const [key, value] of proxyEntries(item)) {
-                    if (!key.startsWith('__')) {
-                        itemBindings[key] = shallowToJjelValue(value);
-                    }
-                }
-            }
-            const childCtx = ctx.child(itemBindings);
-
-            // Apply filter if present
-            if (forall.filter) {
-                const passes = this.evaluateExpression(forall.filter, childCtx);
-                if (!fromJjelValue(passes)) continue;
-            }
-
-            // Execute object creation with the forall variable in scope
-            const created = await this.executeObjectCreation(
-                forall.objectCreation,
-                sourceInstance,
-                itemBindings
-            );
-            results.push(fromJjelValue(created));
-            this.stats.targetInstancesCreated++;
-        }
-
-        // Find the property name to attach results to on the target.
-        // The forall is typically nested inside `-> propName { forall ... }`.
-        // The created objects go into the target instance — the caller handles placement.
-        // For top-level forall in class mapping body, append to a property
-        // named after the target class (lowercased + 's') or use the targetClass directly.
-        const propName = forall.objectCreation.targetClass.charAt(0).toLowerCase()
-            + forall.objectCreation.targetClass.slice(1) + 's';
-
-        if (results.length > 0) {
-            const existing = targetInstance[propName];
-            if (Array.isArray(existing)) {
-                targetInstance[propName] = [...existing, ...results];
-            } else {
-                targetInstance[propName] = results;
-            }
-        }
+        const existing = targetInstance[propName];
+        targetInstance[propName] = Array.isArray(existing) ? [...existing, ...results] : results;
     }
 
     /**
-     * Execute a forall mapping inside an object creation context (e.g., -> col { forall ... }).
-     * Results are added to the parent object.
+     * Execute a forall mapping inside an object creation context
+     * (e.g. `-> feature { -> Class { forall ... } }`).
+     * Results are added to the parent object being created.
      */
     private async executeForAllMappingOnObject(
         forall: ForAllMappingAST,
@@ -1724,62 +2107,18 @@ export class JjtlExecutor {
         parentObject: Record<string, JjelValue>,
         extraBindings?: Record<string, JjelValue>
     ): Promise<void> {
-        const baseCtx = extraBindings
-            ? this.createInstanceContext(sourceInstance).child(extraBindings)
-            : this.createInstanceContext(sourceInstance);
-        const collectionValue = this.evaluateExpression(forall.collection, baseCtx);
-        const collection = fromJjelValue(collectionValue);
+        const results = await this.runForAll(forall, sourceInstance, extraBindings);
+        if (results.length === 0) return;
 
-        if (!Array.isArray(collection)) {
-            if (collection != null) {
-                this.warnings.push(`ForAll collection is not an array: ${typeof collection}`);
-            }
-            return;
-        }
+        const ownerClassName = String(
+            (parentObject as any).__type || (parentObject as any).className || ''
+        );
+        const propName = this.resolveForAllFeature(ownerClassName, forall.objectCreation.targetClass);
 
-        const results: any[] = [];
-
-        for (const item of collection) {
-            const itemBindings: Record<string, JjelValue> = {
-                ...(extraBindings || {}),
-                [forall.variable]: shallowToJjelValue(item),
-            };
-            // Uses proxyEntries to capture L-layer proxy properties
-            if (item && typeof item === 'object') {
-                for (const [key, value] of proxyEntries(item)) {
-                    if (!key.startsWith('__')) {
-                        itemBindings[key] = shallowToJjelValue(value);
-                    }
-                }
-            }
-            const childCtx = baseCtx.child({ [forall.variable]: shallowToJjelValue(item) });
-
-            if (forall.filter) {
-                const passes = this.evaluateExpression(forall.filter, childCtx);
-                if (!fromJjelValue(passes)) continue;
-            }
-
-            const created = await this.executeObjectCreation(
-                forall.objectCreation,
-                sourceInstance,
-                itemBindings
-            );
-            results.push(fromJjelValue(created));
-            this.stats.targetInstancesCreated++;
-        }
-
-        // For object-level forall, store results under the target class name (lowercased + 's')
-        const propName = forall.objectCreation.targetClass.charAt(0).toLowerCase()
-            + forall.objectCreation.targetClass.slice(1) + 's';
-
-        if (results.length > 0) {
-            const existing = parentObject[propName];
-            if (Array.isArray(existing)) {
-                parentObject[propName] = [...(existing as any[]), ...results];
-            } else {
-                parentObject[propName] = results as any;
-            }
-        }
+        const existing = parentObject[propName];
+        parentObject[propName] = (Array.isArray(existing)
+            ? [...(existing as any[]), ...results]
+            : results) as any;
     }
 
     /**
@@ -1808,7 +2147,9 @@ export class JjtlExecutor {
                     }
                 } else if (mapping.conversion) {
                     value = mapping.conversion.expression
-                        ? await this.evaluateExpressionAsync(mapping.conversion.expression, letCtx)
+                        ? this.applyValueMappings(
+                            await this.evaluateExpressionAsync(mapping.conversion.expression, letCtx),
+                            mapping.conversion.mappings)
                         : null;
                 } else if (mapping.sourceAttribute) {
                     value = this.evaluatePropertyPath(mapping.sourceAttribute, letCtx);
@@ -1872,7 +2213,9 @@ export class JjtlExecutor {
                         sourceValue = fromJjelValue(this.evaluatePropertyPath(mapping.sourceAttribute, letCtx));
                     }
                     value = mapping.conversion.expression
-                        ? await this.evaluateExpressionAsync(mapping.conversion.expression, letCtx)
+                        ? this.applyValueMappings(
+                            await this.evaluateExpressionAsync(mapping.conversion.expression, letCtx),
+                            mapping.conversion.mappings)
                         : null;
                 } else if (mapping.sourceAttribute) {
                     value = this.evaluatePropertyPath(mapping.sourceAttribute, letCtx);
@@ -1939,7 +2282,9 @@ export class JjtlExecutor {
         if (sourceInstance && typeof sourceInstance === 'object') {
             for (const [key, value] of proxyEntries(sourceInstance)) {
                 if (!key.startsWith('__')) {
-                    bindings[key] = shallowToJjelValue(value);
+                    bindings[key] = shallowToJjelValue(
+                        key === 'parent' ? this.derefSourceRef(value) : value
+                    );
                 }
             }
 
@@ -1979,7 +2324,9 @@ export class JjtlExecutor {
                     (sourceInstance as any).owner ??
                     null;
                 if (container !== null && container !== undefined) {
-                    bindings.parent = shallowToJjelValue(container);
+                    // Same dereference as inside a forall: a container arriving as
+                    // { __ref: id } is resolved to the source object it names.
+                    bindings.parent = shallowToJjelValue(this.derefSourceRef(container));
                 }
             }
         }
@@ -2189,8 +2536,13 @@ export class JjtlExecutor {
     private wrapIfTargetReference(value: any): any {
         if (value == null || typeof value !== 'object') return value;
         if ((value as any).__ref_result) return value;
+        // A nested creation is an object to be CREATED in a feature, not a pointer
+        // to an existing target: wrapping it would make the write-back look for a
+        // target that never existed.
+        if ((value as any).__nested) return value;
 
         if (Array.isArray(value)) {
+            if (value.some(el => el && typeof el === 'object' && el.__nested)) return value;
             const jjtlTargets = value.filter(el =>
                 el && typeof el === 'object' && el.__createdBy === 'JjTL'
             );

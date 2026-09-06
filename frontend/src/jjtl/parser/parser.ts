@@ -627,10 +627,14 @@ export class JjtlParser {
         const returnType = this.consume(TokenType.IDENTIFIER, "Expected return type").value;
         this.consume(TokenType.LBRACE, "Expected '{'");
 
+        // The lexer emits NEWLINE tokens: the documented helper form puts the
+        // body on its own line(s), so skip them around the expression.
+        this.skipNewlines();
         // Delegate to JjEL parser for full expression support (implies, exists, with...do, etc.)
         const body = this.source !== undefined
             ? this.parseJjELExpression([TokenType.RBRACE])
             : this.expression();
+        this.skipNewlines();
 
         this.consume(TokenType.RBRACE, "Expected '}'");
 
@@ -816,6 +820,12 @@ export class JjtlParser {
             const thenBranch = this.nullCoalesce();
 
             let elseBranch: ExpressionAST | null = null;
+            // Allow the "else" branch on a following line, as in the SPEC
+            // helper examples. Newlines are skipped only when an ELSE follows
+            // them, so a NEWLINE still terminates a := expression.
+            if (this.isElseAfterNewlines()) {
+                this.skipNewlines();
+            }
             if (this.match(TokenType.ELSE)) {
                 elseBranch = this.ifThenElse();
             }
@@ -1455,6 +1465,13 @@ export class JjtlParser {
         while (this.match(TokenType.NEWLINE)) {
             // Skip
         }
+    }
+
+    /** True when the next non-NEWLINE token is ELSE (nothing is consumed). */
+    private isElseAfterNewlines(): boolean {
+        let i = this.current;
+        while (i < this.tokens.length && this.tokens[i].type === TokenType.NEWLINE) i++;
+        return i < this.tokens.length && this.tokens[i].type === TokenType.ELSE;
     }
 
     private match(...types: TokenType[]): boolean {

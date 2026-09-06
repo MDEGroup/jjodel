@@ -1444,10 +1444,21 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                 }
 
                 // Prepare source data (deep copy)
-                // Filter out null/undefined entries: LModel.objects can contain broken
+                // ALL objects of the model, contained ones included: `LModel.objects`
+                // returns `data.objects`, i.e. the roots only, so a rule on a class that
+                // is only ever instantiated inside a containment slot saw zero instances
+                // and produced nothing. `allSubObjects` scans every DObject whose model is
+                // this one — roots and contained alike — and is the accessor `LProject`
+                // already uses (joiner/classes.ts, `get_objects`).
+                // Read ONCE per Execute: the getter rescans the whole store on each access.
+                // Behavioural change: the set of instances a transformation sees no longer
+                // depends on which rules are written (see SPEC.md §9.1).
+                const allSourceObjects: LObject[] =
+                    (sourceModel as any).allSubObjects || sourceModel.objects || [];
+                // Filter out null/undefined entries: the collection can contain broken
                 // pointers (e.g. deleted DObjects) that dereference to undefined and
                 // would crash downstream property accesses like `obj.instanceof`.
-                const sourceObjects = (sourceModel.objects || []).filter((obj: LObject | null | undefined) => {
+                const sourceObjects = allSourceObjects.filter((obj: LObject | null | undefined) => {
                     if (!obj) {
                         //console.warn('[ProjectEditor] Skipping null/undefined object in source model');
                         return false;

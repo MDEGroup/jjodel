@@ -1657,6 +1657,28 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                     references: Record<string, { targets: any[] }>;
                 }> = [];
 
+                // Pending nested creations: objects the transformation asked to CREATE
+                // inside a feature of a target instance (`-> columns { forall ... }`).
+                // They are marked __nested by the executor, which is what tells them
+                // apart from __ref_result (a pointer to a target another rule created).
+                // Applied in STEP 6c, outside the TRANSACTION: LValue.addObject opens
+                // its own TRANSACTION around DObject.new3 (§3.3).
+                const pendingNestedCreations: Array<{
+                    parentName: string;
+                    parentClassName: string;
+                    featureName: string;
+                    children: any[];
+                }> = [];
+
+                // Attributes of objects created by STEP 6c, keyed by the REAL id the
+                // primitive returned — never by name: two tables may each own a column
+                // called "id", and a name lookup could not tell them apart.
+                const pendingChildAttributeSets: Array<{
+                    objectId: string;
+                    className: string;
+                    attributes: Record<string, any>;
+                }> = [];
+
                 // Map __sourceId → objectName: the reliable bridge between executor
                 // target instances and the DObjects created from them.
                 // Each executor target has __sourceId (the Pointer ID of the source
@@ -1822,6 +1844,52 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                                         Object.keys(refs).map(k => `${k}(${refs[k].targets.length})`));
                                 }
 
+                                // Collect nested creations (marked __nested by the executor)
+                                const domainRefNames = new Set(
+                                    (targetClass.allReferences || []).map((r: any) => r.name).filter(Boolean)
+                                );
+                                const nestedKeys = new Set<string>();
+                                for (const [key, val] of Object.entries(instanceData)) {
+                                    if (key.startsWith('__')) continue;
+                                    const candidates = Array.isArray(val) ? val : [val];
+                                    const children = candidates.filter(
+                                        (v: any) => v && typeof v === 'object' && v.__nested
+                                    );
+                                    if (children.length === 0) continue;
+                                    nestedKeys.add(key);
+                                    if (!domainRefNames.has(key)) {
+                                        console.warn(
+                                            `[ProjectEditor] "${objectName}" (${className}): '${key}' is not a reference of `
+                                            + `'${className}', so the ${children.length} object(s) created for it cannot be `
+                                            + `stored and were dropped.`
+                                        );
+                                        continue;
+                                    }
+                                    pendingNestedCreations.push({
+                                        parentName: objectName,
+                                        parentClassName: className,
+                                        featureName: key,
+                                        children,
+                                    });
+                                }
+
+                                // Anything left over is a value the model will not receive.
+                                // It used to fall between the attribute whitelist and the
+                                // reference channel without a word (§6.2 of the discovery).
+                                for (const [key, val] of Object.entries(instanceData)) {
+                                    if (key.startsWith('__')) continue;
+                                    if (key === 'id' || key === 'name' || key === 'className') continue;
+                                    if (val === undefined || val === null) continue;
+                                    if (domainAttrNames.has(key)) continue;
+                                    if (nestedKeys.has(key)) continue;
+                                    if (val && typeof val === 'object' && (val as any).__ref_result) continue;
+                                    console.warn(
+                                        `[ProjectEditor] "${objectName}" (${className}): '${key}' is neither an attribute `
+                                        + `nor a resolved reference nor a nested creation of '${className}'. Value dropped.`,
+                                        val
+                                    );
+                                }
+
                                 instancesCreated++;
                             }
                         });
@@ -1889,7 +1957,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                 }
 
                 // STEP 8: Set attributes after delay — use LModel proxy to find objects by name
-                if ((pendingAttributeSets.length > 0 || pendingReferenceSets.length > 0) && createdModelId) {
+                if ((pendingAttributeSets.length > 0 || pendingReferenceSets.length > 0
+                    || pendingChildAttributeSets.length > 0) && createdModelId) {
                     const modelId = createdModelId;
                     // console.log(`[ProjectEditor] STEP 8: Will set attributes for ${pendingAttributeSets.length} objects via LModel proxy`);
 
@@ -1903,6 +1972,94 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                             }
 
                             const objects = lModel.objects || [];
+
+                    // STEP 6c: Create the objects of nested creations INSIDE their feature.
+                    // `LValue.addObject` wraps `DObject.new3` in its own TRANSACTION
+                    // (LModelElement.tsx, get_addObject), so this must run OUTSIDE the STEP 6
+                    // TRANSACTION — nesting a creator is what loses coordinates and drops
+                    // SetFieldActions (CLAUDE.md §3.3). Same reason DVertex.new is deferred.
+                    //
+                    // Runs at the top of the STEP 8 timeout, where lModel.objects is known
+                    // to be populated. The child is created with its NAME only; the remaining
+                    // attributes are queued against the real id the primitive returns and
+                    // written on a further timer, past addObject's own deferred seeding.
+                    if (pendingNestedCreations.length > 0) {
+                        let nestedCreated = 0;
+                        console.time('[TIMING] nested DObject creation');
+                        try {
+                            const lModelN = lModel;
+                            const rootObjects: LObject[] = (lModelN?.objects || []) as LObject[];
+                            const targetClassesN: LClass[] = targetMetamodel.classes || [];
+
+                            for (const pending of pendingNestedCreations) {
+                                const matches = rootObjects.filter((o: LObject) => o.name === pending.parentName);
+                                if (matches.length !== 1) {
+                                    console.warn(
+                                        `[ProjectEditor] Nested: parent "${pending.parentName}" resolves to `
+                                        + `${matches.length} objects — '${pending.featureName}' left empty.`
+                                    );
+                                    continue;
+                                }
+                                const parent = matches[0];
+                                const slot = (parent as any)['$' + pending.featureName];
+                                if (!slot || typeof slot.addObject !== 'function') {
+                                    console.warn(
+                                        `[ProjectEditor] Nested: feature "$${pending.featureName}" not available on `
+                                        + `"${pending.parentName}" — ${pending.children.length} object(s) dropped.`
+                                    );
+                                    continue;
+                                }
+
+                                for (const child of pending.children) {
+                                    const childClassName = child.__type || child.className;
+                                    const childClass = targetClassesN.find(c => c.name === childClassName);
+                                    if (!childClass) {
+                                        console.warn(`[ProjectEditor] Nested: class "${childClassName}" not found in target metamodel.`);
+                                        continue;
+                                    }
+                                    const childAttrNames = new Set(
+                                        (childClass.allAttributes || []).map((a: any) => a.name).filter(Boolean)
+                                    );
+                                    const childName = typeof child.name === 'string' && child.name
+                                        ? child.name
+                                        : `${childClassName}_${nestedCreated}`;
+                                    try {
+                                        const created = slot.addObject({ name: childName }, childClassName);
+                                        if (!created || !created.id) {
+                                            console.warn(
+                                                `[ProjectEditor] Nested: addObject returned nothing for `
+                                                + `"${pending.parentName}".${pending.featureName} -> ${childClassName}.`
+                                            );
+                                            continue;
+                                        }
+                                        const attrs: Record<string, any> = {};
+                                        for (const [k, v] of Object.entries(child)) {
+                                            if (k === 'name') continue;          // already given to addObject
+                                            if (!childAttrNames.has(k)) continue;
+                                            if (v === undefined || v === null) continue;
+                                            attrs[k] = v;
+                                        }
+                                        if (Object.keys(attrs).length > 0) {
+                                            pendingChildAttributeSets.push({
+                                                objectId: created.id, className: childClassName, attributes: attrs,
+                                            });
+                                        }
+                                        nestedCreated++;
+                                    } catch (e) {
+                                        console.error(
+                                            `[ProjectEditor] Nested: addObject failed for `
+                                            + `"${pending.parentName}".${pending.featureName} -> ${childClassName}:`, e
+                                        );
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('[ProjectEditor] Error creating nested objects (non-fatal):', e);
+                        }
+                        console.timeEnd('[TIMING] nested DObject creation');
+                        console.log(`[ProjectEditor] Nested objects created: ${nestedCreated}`);
+                    }
+
                             // console.log(`[ProjectEditor] LModel has ${objects.length} objects:`, objects.map((o: LObject) => o.name));
 
                             // Resolve an object of the fresh model BY NAME, declaring ambiguity
@@ -1933,6 +2090,41 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
                                 return { found: null, ambiguous: true };
                             };
 
+                            // Write one attribute value on one object.
+                            //
+                            // An attribute typed by an enumerator is stored as a POINTER to a
+                            // DEnumLiteral (setValueAtPosition checks `lval.className === DEnumLiteral`),
+                            // while the executor carries an enum value as the literal's NAME — that is
+                            // also how ProjectEditor serializes it on the source side (wrapIfRef returns
+                            // target.name for a DEnumLiteral). So a string that names a literal of the
+                            // attribute's enum is written as that literal's pointer; anything else is
+                            // written as-is.
+                            const writeAttribute = (lObject: LObject, attrName: string, attrValue: any, who: string): void => {
+                                const feature = (lObject as any)['$' + attrName];
+                                if (!feature) {
+                                    console.warn(`[ProjectEditor] Feature "$${attrName}" not found on "${who}"`);
+                                    const features = lObject.features || [];
+                                    console.warn(`[ProjectEditor] Available features:`, features.map((f: any) => f.name));
+                                    return;
+                                }
+                                const meta: any = (lObject as any).instanceof;
+                                const attrMeta = (meta?.allAttributes || []).find((a: any) => a?.name === attrName);
+                                const attrType: any = attrMeta?.type;
+                                if (attrType && attrType.className === 'DEnumerator' && typeof attrValue === 'string') {
+                                    const literal = (attrType.literals || []).find((l: any) => l?.name === attrValue);
+                                    if (literal) {
+                                        feature.setValueAtPosition(0, literal.id, { isPtr: true });
+                                        return;
+                                    }
+                                    console.warn(
+                                        `[ProjectEditor] "${who}".${attrName}: "${attrValue}" is not a literal of `
+                                        + `enum '${attrType.name}'; written as a plain string.`
+                                    );
+                                }
+                                if (Array.isArray(attrValue)) feature.values = attrValue;
+                                else feature.value = attrValue;
+                            };
+
                             for (const pending of pendingAttributeSets) {
                                 // Find object by name
                                 const r = resolveSeeded(pending.objectName, 'attribute seeding');
@@ -1947,21 +2139,45 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ project, onNavigateBack }
 
                                 for (const [attrName, attrValue] of Object.entries(pending.attributes)) {
                                     try {
-                                        const feature = (lObject as any)['$' + attrName];
-                                        if (feature) {
-                                            if (Array.isArray(attrValue)) feature.values = attrValue;
-                                            else feature.value = attrValue;
-                                            // console.log(`[ProjectEditor] ✅ Set ${pending.objectName}.${attrName} = ${JSON.stringify(attrValue)}`);
-                                        } else {
-                                            console.warn(`[ProjectEditor] ❌ Feature "$${attrName}" not found on "${pending.objectName}"`);
-                                            // Try listing available features for debugging
-                                            const features = lObject.features || [];
-                                            console.warn(`[ProjectEditor] Available features:`, features.map((f: any) => f.name));
-                                        }
+                                        writeAttribute(lObject, attrName, attrValue, pending.objectName);
                                     } catch (e) {
                                         console.error(`[ProjectEditor] Error setting ${attrName} on "${pending.objectName}":`, e);
                                     }
                                 }
+                            }
+
+                            // Attributes of the objects STEP 6c created inside a feature.
+                            // Resolved by the real id the primitive returned, never by name:
+                            // two tables may each own a column called "id".
+                            // Deferred once more: addObject seeds its own json values on a
+                            // timer of U.UpdatingTimer * 2 (600ms) and the child's DValues do
+                            // not exist before that, so writing here would find no $feature.
+                            if (pendingChildAttributeSets.length > 0) {
+                                setTimeout(() => {
+                                    for (const pending of pendingChildAttributeSets) {
+                                        try {
+                                            const lChild = LPointerTargetable.fromPointer(pending.objectId) as LObject | undefined;
+                                            if (!lChild) {
+                                                console.warn(
+                                                    `[ProjectEditor] Nested: object ${pending.objectId} (${pending.className}) `
+                                                    + `no longer resolves; its attributes were not written.`
+                                                );
+                                                continue;
+                                            }
+                                            const who = `${lChild.name || pending.objectId} (${pending.className})`;
+                                            for (const [attrName, attrValue] of Object.entries(pending.attributes)) {
+                                                try {
+                                                    writeAttribute(lChild, attrName, attrValue, who);
+                                                } catch (e) {
+                                                    console.error(`[ProjectEditor] Error setting ${attrName} on ${who}:`, e);
+                                                }
+                                            }
+                                        } catch (e) {
+                                            console.error(`[ProjectEditor] Error seeding nested object ${pending.objectId}:`, e);
+                                        }
+                                    }
+                                    console.log(`[ProjectEditor] ✅ Nested attribute setting complete`);
+                                }, 1000);
                             }
 
                             console.log(`[ProjectEditor] ✅ Attribute setting complete`);

@@ -13,6 +13,34 @@ rewrite su albero condiviso a causare il secondo incidente. Formato «SHA -> con
 - `ed5c80daa` — referto UNQ1 C5 che cita l'hash del codice sbagliato (`46a38022`, tolto dal
   ramo dal `reset` di un'altra corsia). Corretto in `ca0adaf95`, che lo riporta a `4bde4359`.
 
+## 2026-09-06 — fix(jjtl): accept newlines in helper bodies and before else
+**Prompt**: un `helper` con il corpo su righe separate non parsa mai nell'app (Monaco e Validate:
+"Expected expression" sulla `{`), nemmeno nelle forme documentate in SPEC §3.4 e §13.2. Decisione
+di Alfonso: procedere col rischio minore. Fix stretto nel parser interno di espressioni, non il
+cambio dei call site.
+**Files touched**: `frontend/src/jjtl/parser/parser.ts` (+17: due `skipNewlines()` in `helper()`,
+lookahead `isElseAfterNewlines()` in `ifThenElse()`), `frontend/src/jjtl/__tests__/helper-multiline.test.ts`
+(nuovo, 9 test); poi `docs/discovery/discovery_2026-09-06_jjtl_helper_body_newlines.md`,
+`docs/prompts/claude_2026-09-06_1500_prompt_jjtl_helper_body_newlines.md` e questa entry nel
+commit docs.
+**Outcome**: ✅ completed
+**Corregge**: —
+**Causa**: —
+**Regressions**: no — `vitest run src/jjtl` 116 verdi / 0 falliti (era 107, +9), i 7 file
+`window is not defined` pre-esistenti invariati. `tsc --noEmit` 14 errori, 0 sotto `src/jjtl/`
+(baseline "scattered" di §17 su filesystem case-sensitive). `build` exit 0 col solo avviso di
+chunk-size. Un `NEWLINE` non seguito da `else` termina ancora un `:=` (test dedicato).
+**Out-of-scope changes**: no
+**Layer Impact Report**: not-required — solo parser JjTL.
+**Smoke visivo**: non applicabile — da verificare a mano da Alfonso: incollare l'helper, la
+sottolineatura sulla `{` sparisce, Validate 0 errori.
+**Notes**: Root cause (report F1): l'app non passa mai il sorgente al parser (`JjtlEditor.tsx:57`,
+`useJjtlParser.ts:61`), quindi la delega a JjEL non è mai esercitata dall'app, solo dai test.
+Passare `source` ai call site è il fix di prospettiva ma cambia il parser di tutte le espressioni
+`:=`/`where`/`let`: decisione aperta, discovery a due fasi (F5). Verificato sul clone cloud, file
+portati sul Mac via bridge, commit dalla shell nativa.
+**Prompt document name**: 2026-09-06 15:00
+
 ## 2026-09-06 — feat(jjtl): istanze sorgente contenute e creazione annidata nelle feature (Fase 2)
 **Prompt**: GO Fase 2 con sette decisioni ratificate (D1..D7): feature risolta contro il metamodello e mai validata come classe, `forall` dentro il wrapper e a livello di regola con lookup della feature e fallback dichiarato, deref di `{__ref}` nel forall e su `parent`, enumerazione sempre di tutti gli oggetti del modello sorgente, write-back degli annidati come DObject contenuti, messaggi che non mentono, due limiti del parser. Deroga alla regola 19 dichiarata nel GO. HARD STOP dopo il commit 4 per la verifica visiva.
 **Files touched**: `frontend/src/components/project/ProjectEditor.tsx` (commit 1 `f428e1470`, commit 4 `3d6b16e14`); `frontend/src/jjtl/parser/parser.ts` (`63131b0fb`); `frontend/src/jjtl/executor/executor.ts` (`cde18558b`); nuovi `frontend/src/jjtl/executor/__tests__/contained-sources.test.ts` (4 test), `frontend/src/jjtl/executor/__tests__/nested-creation-into-features.test.ts` (23 test), `frontend/src/jjtl/parser/__tests__/forall-and-value-mappings.test.ts` (11 test); `frontend/src/jjtl/SPEC.md`, `frontend/src/jjtl/CLAUDE.md`, `frontend/src/jjtl/AGENTS.md` (`454773e8b`). Questa entry a parte.

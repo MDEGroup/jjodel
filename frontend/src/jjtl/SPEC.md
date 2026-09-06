@@ -165,15 +165,22 @@ Class c, Package p -> Table where c.package = p {
 
 ```ebnf
 attributeMapping = targetAttr ":=" ( sourceAttr | expression ) ( ":" valueMappingList )?
-                 | "->" targetAttr objectCreation ;
+                 | "->" targetAttr ( ":" expression ( ":" valueMappingList )? )?
+                 | "->" targetFeature objectCreation ;
 
 sourceAttr       = IDENTIFIER ;
 targetAttr       = IDENTIFIER ;
+targetFeature    = IDENTIFIER ;   -- a feature of the ENCLOSING target class
 
 valueMappingList = valueMapping ( "," valueMapping )* ;
-valueMapping     = literal "=" literal ;
+valueMapping     = valueKey "=" valueKey ;
+valueKey         = literal | IDENTIFIER ;
 
-objectCreation   = "{" ( "->" IDENTIFIER objectCreation | mappingBodyItem )* "}" ;
+objectCreation   = "{" ( "->" targetType mappingBody | forAllMapping+ ) "}" ;
+
+forAllMapping    = "forall" IDENTIFIER "in" expression
+                   ( "such" "that" expression )? NEWLINE*
+                   "->" targetType mappingBody ;
 ```
 
 **Binding forms:**
@@ -183,8 +190,63 @@ objectCreation   = "{" ( "->" IDENTIFIER objectCreation | mappingBodyItem )* "}"
 | Direct copy | `label := name` | `target.label = source.name` |
 | Expression | `fullName := name + " " + surname` | `target.fullName = eval(expr)` |
 | Value mapping | `tokens := isInitial : true=1, false=0` | Lookup table |
+| Value mapping (enum) | `type := a.type : String=VARCHAR` | Lookup table with identifier keys |
+| Conversion | `-> label : name.toUpper()` | `target.label = eval(expr)` |
+| Conversion + lookup | `-> type : a.type : String=VARCHAR` | Both, in that order |
 | Computed | `count := items.size()` | `target.count = eval(expr)` |
-| Object creation | `-> arcs { -> Arc { ... } }` | Create nested object |
+| Object creation | `-> columns { -> Column { ... } }` | One object, in feature `columns` |
+| Iterated creation | `-> columns { forall a in attrs -> Column { ... } }` | One object per element, in `columns` |
+
+#### Object creation
+
+`-> feature { ... }` creates objects and stores them **in that feature of the
+enclosing target instance**. `feature` is resolved against the target metamodel
+and is **never validated as a class name**. Two bodies are legal:
+
+```jjtl
+Entity -> Table {
+    name := name
+
+    -- one object
+    -> primaryKey {
+        -> Column { name := "id" }
+    }
+
+    -- one object per element of a collection
+    -> columns {
+        forall a in ownedAttributes such that not a.derived -> Column {
+            name := a.name
+            isPrimaryKey := a.isKey
+            type := a.type : String=VARCHAR, Integer=INTEGER
+        }
+    }
+}
+```
+
+Rules:
+
+- A **bare class creation in a rule body** — `-> Column { ... }` with no enclosing
+  feature — is a **validation error**: `Object creation must be nested in a feature`.
+  There is no feature to store the object in, so it used to run and produce nothing.
+- A `forall` **directly in a rule body**, naming no feature, is still accepted. The
+  executor looks for the one reference of the target class that can hold the created
+  class (its type, or a supertype of it); with none or several it falls back to the
+  pluralization heuristic `Column → columns` and **warns naming the guess**. Write
+  `-> feature { forall ... }` to say it explicitly.
+- Objects created inside a feature carry `__createdBy: 'JjTL'` and `__nested: true`.
+  `__nested` is what distinguishes *an object to create in this feature* from
+  `__ref_result`, *a pointer to a target another rule created*.
+- A wrapper whose body is neither of the two forms produces a warning and no object.
+
+#### Reference collections in `forall`
+
+The source model serializes every reference value as `{ __ref: pointerId }`. Inside a
+`forall` each element is dereferenced to the **source object** it names before the body
+runs, so `a.name` reads the attribute rather than `undefined`. Elements naming no object
+of the source model are iterated unresolved, with one warning per collection.
+
+This is the opposite direction from trace resolution (§5.3), which maps the same wrapper
+source → **target**. Both coexist and neither changed the other.
 
 **Property resolution** (4-strategy fallback for reading source values):
 1. Direct property access: `source[path]`
@@ -277,6 +339,20 @@ The executor accepts four input formats:
 | Object with `.classes` | `source.classes` exists | Class definitions as instances |
 | Object with `.instances` | `source.instances` exists | Instances array |
 | Flat object | Any object | Array-valued properties iterated |
+
+**Which instances the array contains.** `ProjectEditor` builds it from
+`LModel.allSubObjects` — every object of the source model, contained ones
+**included**. It used to build it from `LModel.objects`, the roots only, so a class
+instantiated exclusively inside a containment slot reported
+*"Source class 'X' has no instances in the source model"* and produced nothing.
+
+This is a behavioural change with a scope wider than the bug it fixes: **the set of
+instances a transformation sees no longer depends on which rules are written**. A rule
+on a contained class that was silently empty now produces output, and `source` / `data`
+(bound to the whole array) count more elements than before.
+
+Each contained object carries `_containerId`, the id of the object that owns it through
+a containment feature; `parent` resolves through it (§7.3).
 
 ### 4.3 Guard Evaluation
 
@@ -540,21 +616,61 @@ Three implementations:
 
 ### 9.1 Source Model Conversion
 
-`jjodelConverter.ts` provides `convertJjodelModelToSource(model)`:
-- Converts `LModel.objects` (LProxy objects) to plain `SourceElement[]`
-- Each element has: `name`, `className`, `attributes: Map`, `references: Map`
-- Class name resolved via: `instanceof.name` → `className` → `__type` → `class.name`
+The conversion that actually runs lives in `ProjectEditor.handleExecuteTransformation`:
+it reads `sourceModel.allSubObjects` **once** per Execute (the accessor rescans the whole
+store on each access), maps each object to `{ id, name, className, __type, ...features }`,
+wraps reference values as `{ __ref: pointerId }` and enum values as the literal's **name**,
+and computes `_containerId` for contained objects. See §4.2.
+
+`jjodelConverter.ts` also provides `convertJjodelModelToSource(model)`, which converts
+`LModel.objects` to `SourceElement[]`. It is **not** on the execution path.
 
 ### 9.2 Target Model Write-back
 
-> **Not in jjodelConverter.** Lives in `ProjectEditor.tsx` with timing workarounds:
+> **Not in jjodelConverter.** Lives in `ProjectEditor.tsx` with timing workarounds.
+> `convertResultToJjodel()` exists in the converter, is imported by the executor, and is
+> **never called**: it is not the write-back. Left in place pending a decision.
+
+Rule-level instances (STEP 6, 6b, 8, 8b):
 
 1. Create `DObject.new(instanceOf, father, fatherType, name, persist)` inside a TRANSACTION
 2. IDs are temporary during TRANSACTION — cannot use them immediately
-3. After TRANSACTION: `setTimeout(1000)` → locate object by name via `lModel.objects.find()`
-4. Write attribute values: `(lObject as any)['$' + attrName].value = attrValue`
+3. `DVertex.new` runs **after** the TRANSACTION: it opens its own, and nesting creators
+   loses coordinates (root `CLAUDE.md` §3.3)
+4. After TRANSACTION: `setTimeout(1000)` → locate object by name via `lModel.objects`
+   (`resolveSeeded` declares ambiguity instead of resolving it)
+5. Write attribute values through `writeAttribute` (see below)
+6. Write reference values with `setValueAtPosition(i, id, { isPtr: true })`
 
-This is fragile. A proper `convertResultToJjodel()` in the converter should encapsulate this pattern.
+Nested objects (STEP 6c), i.e. what `-> feature { ... }` created:
+
+7. `LValue.addObject(json, className)` on the parent's `$feature` slot. **It opens its own
+   TRANSACTION around `DObject.new3`**, so it runs outside STEP 6's, for the same reason as
+   `DVertex.new`. It runs at the top of the STEP 8 timeout, where `lModel.objects` is
+   populated.
+8. The child is created with its **name only**. Its remaining attributes are queued against
+   the **real id `addObject` returned** and written on a further timer, past `addObject`'s
+   own deferred value seeding (`U.UpdatingTimer * 2`).
+
+**Design decision — children are resolved by id, not by name.** The STEP 8/8b name pool
+stays `lModel.objects` (the roots). Two tables may each own a column called `id`: a name
+lookup could not tell them apart, and widening the pool would only make the rule-level
+lookups ambiguous without serving any case — nothing puts a contained object in the
+reference-target map. This is design, not a limitation.
+
+**Design decision — enum values travel as strings.** The executor carries an enum value as
+the literal's **name**, which is also how the source side serializes it. `writeAttribute`
+resolves it at the last moment: when the target attribute is typed by a `DEnumerator` and
+the value names one of its literals, it writes that literal's **pointer** with
+`setValueAtPosition(0, literal.id, { isPtr: true })`, because that is how the D-layer stores
+an enum. A string naming no literal is written as-is, with a warning. This keeps the
+executor free of Jjodel pointers and confines the D-layer knowledge to the write-back.
+
+**Every value that does not reach the model is now named.** A key that is neither an
+attribute of the target class, nor a resolved reference, nor a nested creation is reported
+with the instance, the feature and the reason. It used to fall between the attribute
+whitelist (`allAttributes`, which excludes references) and the `__ref_result` channel
+without a word.
 
 ---
 
@@ -568,6 +684,11 @@ This is fragile. A proper `convertResultToJjodel()` in the converter should enca
 | Property path not found | Return `null` after trying all 4 strategies |
 | Value mapping: no match | Return `null` |
 | Object creation error | Log warning, assign `null` |
+| Object creation with no feature | **Validation error**, nothing created |
+| Feature of `-> feature { ... }` unknown | Warning naming instance and feature, nothing created |
+| Wrapper body neither `-> Class` nor `forall` | Warning naming the feature, nothing created |
+| `forall` element is an unresolvable `{ __ref }` | One warning per collection, element iterated unresolved |
+| Value that reaches no attribute, reference or feature | Warning naming instance, key and reason |
 
 No exceptions are thrown to the caller. All errors are caught and logged.
 
@@ -611,7 +732,10 @@ interface ExecutionResult {
 | Value mapping conversion | ✅ | `executor/executor.ts` |
 | Expression conversion (via JjEL) | ✅ | `executor/astBridge.ts` |
 | Helper definition + calling | ✅ | `executor/executor.ts` lines 270-325 |
-| Nested object creation | ✅ | `executor/executor.ts` |
+| Nested object creation into a target feature | ✅ | `executor/executor.ts`, `components/project/ProjectEditor.tsx` |
+| `forall` in a mapping body | ✅ | `parser/parser.ts`, `executor/executor.ts` |
+| Contained source instances | ✅ | `components/project/ProjectEditor.tsx` |
+| Reference collections dereferenced in `forall` | ✅ | `executor/executor.ts` |
 | Trace model (build + query) | ✅ | `executor/traceModel.ts` |
 | Per-binding invertibility | ✅ | `executor/executor.ts` lines 678-776 |
 | Bidirectionality analyzer | ✅ | `analyzer/bidirectionality.ts` |
@@ -625,11 +749,21 @@ interface ExecutionResult {
 
 | Bug | Description | Severity |
 |---|---|---|
+| `.forAll(x: pred)` never parses on the app path | The lexer lowercases before the keyword lookup (`lexer.ts:330`), so `forAll` lexes as FORALL and cannot be a member access; `useJjtlParser` calls `parse(tokens)` without `source`, i.e. the legacy expression parser, where JjEL is not consulted | High |
+| 7 test files fail at import | `window is not defined` under `environment: 'node'`: `executor.ts` imports the `joiner` barrel for `U.asNumber` alone, which drags in monaco/jquery/sweetalert2/axios. `forall-mapping.test.ts` is among them, so nine forall tests do not run | High |
 | Multiplicity `[*]` | Always creates 1 instance | Medium |
 | Number type | All numbers bridged as `EInt`, never `EDouble` | Low |
 | Duplicate values | B_1 may receive A_0's attribute values | High |
 | Double execution | React StrictMode double-render causes second execution | Medium |
 | Debug logging | Extensive `console.log` in executor not cleaned up | Low |
+
+**One ambiguity left by design.** The parser produces two shapes for the same node, and
+the executor tells them apart by `objectCreation.targetClass === targetAttribute`, which
+the "nested mapping body" branch always yields. That is decisive except in one case: a
+feature whose name is exactly the class it holds, written as `-> Column { -> Column { ... } }`.
+It lands on the "wrapper body is neither form" warning rather than creating. Features are
+lowercase by convention, so the case is theoretical; it is named here because it produces a
+message, not silence.
 
 ### 12.3 Implementation Gaps (Priority Order)
 
@@ -716,6 +850,39 @@ helper mapType(umlType: String) -> String {
     else "VARCHAR(255)"
 }
 ```
+
+### 13.2b ER to Relational — contained sources and iterated creation
+
+The `Attribute` instances live inside `Entity.ownedAttributes`, so they are contained,
+not roots (§4.2); `ownedAttributes` arrives as a collection of `{ __ref }` and is
+dereferenced inside the `forall` (§3.3).
+
+```jjtl
+transformation ER2Relational
+from ERD
+to Relational
+
+Entity -> Table {
+    name := name
+
+    -> columns {
+        forall a in ownedAttributes -> Column {
+            name := a.name
+            isPrimaryKey := a.isKey
+            type := a.type : String=VARCHAR, Integer=INTEGER, Boolean=BOOLEAN
+        }
+    }
+}
+
+Relationship -> ForeignKey {
+    name := name
+    source := left        -- implicit trace resolution: Entity → Table
+    target := right
+}
+```
+
+The `Column` objects become DObjects **contained in** `Table.columns`; `type` is written
+as a pointer to the `SqlType` literal named by the mapped value (§9.2).
 
 ### 13.3 With Interactive Features (target state)
 

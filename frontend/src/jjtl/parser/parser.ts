@@ -272,7 +272,7 @@ export class JjtlParser {
                     };
                 }
             } else if (this.match(TokenType.COLON)) {
-                conversion = this.conversion();
+                conversion = this.conversion(this.findValueMappingColon());
             }
 
             return {
@@ -346,7 +346,7 @@ export class JjtlParser {
 
         let conversion: ConversionAST | undefined;
         if (this.match(TokenType.COLON)) {
-            conversion = this.conversion();
+            conversion = this.conversion(this.findValueMappingColon());
         }
 
         return {
@@ -394,9 +394,7 @@ export class JjtlParser {
                     if (brace === 0 && paren === 0 && bracket === 0) {
                         const next1 = i + 1 < this.tokens.length ? this.tokens[i + 1] : null;
                         const next2 = i + 2 < this.tokens.length ? this.tokens[i + 2] : null;
-                        if (next1 && (next1.type === TokenType.BOOLEAN ||
-                                      next1.type === TokenType.NUMBER ||
-                                      next1.type === TokenType.STRING) &&
+                        if (next1 && this.isValueMappingKey(next1.type) &&
                             next2 && next2.type === TokenType.EQUALS) {
                             return true;
                         }
@@ -505,6 +503,11 @@ export class JjtlParser {
         }
 
         // Required: object creation -> Type { ... }
+        // The lexer emits NEWLINE tokens: skip them so the arrow may sit on its
+        // own line under a long collection or `such that` clause. Same defect
+        // class as the one fixed in attributeMapping() (a4355b365), in a
+        // different position.
+        this.skipNewlines();
         this.consume(TokenType.ARROW, "Expected '->' for object creation in forall");
         const targetClass = this.consume(TokenType.IDENTIFIER, "Expected target class name").value;
         this.consume(TokenType.LBRACE, "Expected '{'");
@@ -530,12 +533,18 @@ export class JjtlParser {
         };
     }
 
-    // conversion = valueMapping ("," valueMapping)* | expression
-    private conversion(): ConversionAST {
+    // conversion = valueMapping ("," valueMapping)* | expression (":" valueMapping ("," valueMapping)*)?
+    //
+    // `hasValueMappingColon` is the caller's lookahead: true when a value-mapping
+    // colon sits at depth 0 ahead of the conversion, i.e. the second colon of
+    // `-> type : a.type : String=VARCHAR`. It makes the expression stop at that
+    // colon instead of swallowing it — without it the JjEL delegation choked on
+    // the '=' and the legacy path fell through to "Expected source attribute name".
+    private conversion(hasValueMappingColon: boolean = false): ConversionAST {
         const startToken = this.peek();
 
         // Try to parse as value mappings: true=1, false=0
-        // Lookahead: only if the first literal is followed by '='
+        // Lookahead: only if the first key is followed by '='
         if (this.isValueMappingStart()) {
             const mappings = this.parseValueMappingPairs();
             return {
@@ -546,24 +555,49 @@ export class JjtlParser {
         }
 
         // Delegate to JjEL parser for full expression support (implies, exists, with...do, etc.)
+        const stopTokens = hasValueMappingColon
+            ? [TokenType.NEWLINE, TokenType.RBRACE, TokenType.COLON]
+            : [TokenType.NEWLINE, TokenType.RBRACE];
         const expression = this.source !== undefined
-            ? this.parseJjELExpression([TokenType.NEWLINE, TokenType.RBRACE])
+            ? this.parseJjELExpression(stopTokens)
             : this.expression();
+
+        let mappings: ValueMappingAST[] | undefined;
+        if (hasValueMappingColon && this.match(TokenType.COLON)) {
+            mappings = this.parseValueMappingPairs();
+        }
+
         return {
             type: 'Conversion',
             expression,
+            mappings,
             location: this.makeLocation(startToken, this.previous()),
         };
     }
 
-    // Check if current position starts a value mapping: literal = literal
+    // Check if current position starts a value mapping: key = value
     private isValueMappingStart(): boolean {
-        if (!this.check(TokenType.BOOLEAN) && !this.check(TokenType.NUMBER) && !this.check(TokenType.STRING)) {
+        if (!this.isValueMappingKey(this.peek()?.type)) {
             return false;
         }
-        // Lookahead: is the token AFTER the literal an '='?
+        // Lookahead: is the token AFTER the key an '='?
         const next = this.peekNext();
         return next !== undefined && next.type === TokenType.EQUALS;
+    }
+
+    /**
+     * Token types admissible as a value-mapping key or value.
+     *
+     * IDENTIFIER is included so that enum literals and type names work as keys:
+     * `type := a.type : String=VARCHAR, Integer=INTEGER`. Without it the lookahead
+     * failed, the `:` was read as a conversion and the parser choked on the `=`.
+     * An identifier is carried as a string literal (see `literal()`), which is the
+     * form the source side already has — ProjectEditor serializes a DEnumLiteral
+     * pointer as the literal's name.
+     */
+    private isValueMappingKey(type: TokenType | undefined): boolean {
+        return type === TokenType.BOOLEAN || type === TokenType.NUMBER
+            || type === TokenType.STRING || type === TokenType.IDENTIFIER;
     }
 
     // helper = "helper" IDENTIFIER "(" paramList? ")" "->" IDENTIFIER "{" expression "}"
@@ -1227,6 +1261,14 @@ export class JjtlParser {
             case TokenType.NULL:
                 value = null;
                 literalType = 'null';
+                break;
+            case TokenType.IDENTIFIER:
+                // Value-mapping keys and values only: `primary()` guards its call
+                // to literal() on BOOLEAN/NUMBER/STRING/NULL, so an identifier can
+                // reach here solely through parseValueMappingPairs(). Carried as a
+                // string: an enum literal is matched and written by name.
+                value = token.value;
+                literalType = 'string';
                 break;
             default:
                 throw this.error(token, "Expected literal");

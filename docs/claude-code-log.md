@@ -13,6 +13,19 @@ rewrite su albero condiviso a causare il secondo incidente. Formato «SHA -> con
 - `ed5c80daa` — referto UNQ1 C5 che cita l'hash del codice sbagliato (`46a38022`, tolto dal
   ramo dal `reset` di un'altra corsia). Corretto in `ca0adaf95`, che lo riporta a `4bde4359`.
 
+## 2026-09-06 — docs: discovery delle istanze sorgente contenute e della creazione annidata JjTL (Fase 1)
+**Prompt**: Fase 1 read-only two-phase: confermare il percorso `ProjectEditor` → `executor.execute` e se `allSubObjects` sia la sorgente giusta (con `_containerId`/`parent`); tracciare come parsano ed eseguono `-> feature { … }`, `-> Class { … }` e `forall … -> Class { … }`, e come gli annidati diventino DObject; verificare i limiti del parser elencati. Referto obbligatorio, hard stop prima di qualunque codice.
+**Files touched**: `docs/discovery/discovery_2026-09-06_jjtl_contained_sources_nested_creation.md` (nuovo, 452 righe). Nessun file di codice.
+**Outcome**: ✅ completed
+**Corregge**: —
+**Causa**: —
+**Regressions**: no — nessun file di codice toccato, `frontend/src` pulito a fine giro (verificato con `git status --porcelain frontend/src`, vuoto, con controllo positivo sullo stesso comando senza pathspec). Nessun gate di build o suite eseguito: dichiarato nel referto §10.
+**Out-of-scope changes**: no
+**Layer Impact Report**: not-required — nessun file di §3.1. `LModelElement.tsx` e `joiner/classes.ts` letti e non modificati, come impone il perimetro.
+**Smoke visivo**: non applicabile — Fase 1 read-only. Al posto suo, quattro sonde fuori albero che ESEGUONO lexer/parser/executor (P11) e non ne leggono il sorgente; misure in referto §4.2, §6.3, §7.
+**Notes**: Due findings cambiano la forma della Fase 2, entrambi nel referto: togliendo il warning su `columns` nessuna delle tre forme crea un Column, perche' gli annidati non entrano in `targetModel.instances` e STEP 6 li scarta (§6); e `forall a in ownedAttributes` itera involucri `{__ref}`, non oggetti, quindi i Column nascerebbero a null (§8 R2, fuori prompt). H4 falsificata (§7.1, §7.3). Confermato il NEWLINE prima di `->` nel forall: chiude F5 del referto 2026-09-04. Sei domande aperte in §9.
+**Prompt document name**: 2026-09-06 14:40
+
 ## 2026-09-05 — feat(rail): la select «Palette» del Data Manager (R-SKIN slice C, chiude la Fase 2)
 **Prompt**: GO emendato R-SKIN Fase 2, slice C: select «Palette» nel `DataManagerViewpointPanel` sotto «Form theme», stesso `writeViewpoint`, default `Slate`. Sonda end-to-end su B+C su tabella e drawer; negativo: un progetto senza `formPalette` identico a oggi. HARD STOP dopo il commit.
 **Files touched**: `frontend/src/components/editors/viewpoint/properties/DataManagerViewpointPanel.tsx` — commit `8116e35da`. Sonda a parte: `probe_2026-09-05_rskin_sliceC_select.mts` (nuova).

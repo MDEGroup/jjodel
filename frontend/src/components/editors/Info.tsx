@@ -822,6 +822,7 @@ function PropertiesOverview(props: { data: LModel; onViewAnalytics?: () => void 
     const packages = data.packages?.length || 0;
     const classes = data.classes?.length || 0;
     const enumerators = data.enumerators?.length || 0;
+    const types = data.typeDeclarations?.length || 0;
 
     return (
         <div className="properties-section">
@@ -847,6 +848,11 @@ function PropertiesOverview(props: { data: LModel; onViewAnalytics?: () => void 
                         <i className="bi bi-list-ul" />
                         <span className="cell-value">{enumerators}</span>
                         <span className="cell-label">Enumerators</span>
+                    </div>
+                    <div className="overview-cell">
+                        <i className="bi bi-list-ul" />
+                        <span className="cell-value">{types}</span>
+                        <span className="cell-label">Type Declarations</span>
                     </div>
                 </div>
 

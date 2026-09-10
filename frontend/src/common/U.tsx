@@ -384,9 +384,10 @@ export class U {
         return Object.values(map);
     }
 
-    static solveEcoreType(v: string, asPointer: boolean = false): string {
+    static solveEcoreType(v: string, asPointer: boolean = false, voidReturn = '', emptyReturn = ''): string {
         if (!v) return v;
-        if (v.indexOf('#//') === 0) v = v.substring(3);
+        const prefix = "ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//"
+        if (v.indexOf(prefix) === 0) v = v.substring(prefix.length);
         switch (v) {
             case ShortAttribETypes.EVoid:     v = 'Void';    break;
             case ShortAttribETypes.EChar:     v = 'Char';    break;
@@ -403,7 +404,8 @@ export class U {
         }
         if (!asPointer) return v;
         // return as pointer
-        if (!v || v === "Void") return "";
+        if (v === "Void") return voidReturn;
+        if (!v) return emptyReturn;
         return (window as any).Pointers.prefix + "_" + v;
     }
     static alertSeparator: string = '£';
@@ -1965,9 +1967,7 @@ export class U {
         return +ret;
     }
 
-    // determines if the object is closer to type A or B, by passing the keys of A and B as string arrays, or an object assumed to have all the keys of A, B.
-    // @return: A and B as % of keys in o being in A or B, arr === keysA or keysB according to the highest similarity.
-    static closerTo(o: GObject, keysA: GObject | string[], keysB: GObject | string[]): {A: number, B: number, closestKeys: GObject | string[]}{
+    static closerTo_old(o: GObject, keysA: GObject | string[], keysB: GObject | string[]): {A: number, B: number, closestKeys: GObject | string[]}{
         const useSetA = Array.isArray(keysA);
         const useSetB = Array.isArray(keysB);
         const aKeys = useSetA ? new Set<string>(['a1', 'a2', 'a3']) : null;
@@ -1978,6 +1978,40 @@ export class U {
         const B = keys.filter(k => bKeys ? bKeys.has(k) : k in keysA).length / total;
         return {A, B, closestKeys: B > A ? keysB : keysA};
     }
+
+// determines if the object is closer to type A or B, by passing the keys of A and B as string arrays, or an object assumed to have all the keys of A, B.
+// @return: a dictionary with scores to each key set, counting how many keys were present.
+//            each key set is scored with A-Z letters or by index position in the argument.
+static closerTo(o: GObject, ...keysSets: (GObject | string[])[]): Dictionary<string, number> & Dictionary<number, number> & {
+        closestKeys: GObject | string[],
+        closestIndex: number
+} {
+    const total = Object.keys(o).length || 1;
+    const oKeys = Object.keys(o);
+
+    const ret: Dictionary<string, number> & Dictionary<number, number> & {
+        closestKeys: GObject | string[],
+        closestIndex: number
+    } = {} as any;
+    const counts: Record<string, number> = ret;
+    let maxScore = -1;
+    let closestIndex = 0;
+
+    keysSets.forEach((keysX, i) => {
+        const useSet = Array.isArray(keysX);
+        const setX = useSet ? new Set<string>(keysX as string[]) : null;
+        const score = oKeys.filter(k => setX ? setX.has(k) : k in (keysX as GObject)).length / total;
+
+        // store by index
+        ret[i] = score;
+        // store by uppercase letter (A=0, B=1, ... Z=25, falls back to index if > 25)
+        if (i < 26) counts[String.fromCharCode(65 + i)] = score;
+        if (score > maxScore) { maxScore = score; ret.closestIndex = i; }
+    });
+
+    ret.closestKeys = keysSets[ret.closestIndex];
+    return ret;
+}
 
     // faster than jquery, underscore and many native methods checked https://stackoverflow.com/a/59787784
     public static isEmptyObject(obj: GObject | undefined): boolean {
@@ -3295,6 +3329,13 @@ export class Uarr{
         return ((index % length) + length) % length;
     }
 
+    // XMI parsers emit a single object when there is one child,
+    // and an array when there are multiple. Normalise to always array.
+    static normalizeArray<T>(value: T | T[] | undefined): T[] {
+        if (value === undefined || value === null) return [];
+        return Array.isArray(value) ? value : [value];
+    }
+
     // filter can either be a value or a filter function
     static findAllIndexes<T extends any>(arr: T[], filter: T | ((val: T, index: number, arr: T[]) => boolean)): number[] {
         const ret: number[] = [];
@@ -3927,6 +3968,9 @@ export enum AttribETypes {
   ELongObj = 'ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//ELongObject', */
     // EELIST = 'ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EEList', // List<E> = List<?>
 }
+
+// alias
+export function isAttribEType(s: any): boolean { return !!U.solveEcoreType(s, false); }
 
 // export type Json = object;
 

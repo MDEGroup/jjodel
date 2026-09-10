@@ -114,6 +114,7 @@ export {Constructors, JsType, RuntimeAccessibleClass, DPointerTargetable,
     Language,
     LUser, DUser, DProject, LProject, Pointers, PointedBy, PendingPointedByPaths, CoordinateMode, EGraphElements, EModelElements, transientProperties,
     ViewEClassMatch, notLanguageFragments, LanguageCache, ParserData, ProjectPointers, UserPointers,
+    Alias
 } from "./classes";
 
 export {Info} from '../model/Info';
@@ -215,6 +216,8 @@ export {store} from "../redux/createStore";
 export {Debug} from "../debugtools/debug";
 
 export {OCL} from "../ocl/ocl";
+
+export {T2M, M2T, parseT2M} from "../components/forEndUser/MTM";
 
 
 

@@ -1,9 +1,9 @@
-import {
+import type{
     Json,
     Pointer,
     GObject,
     Dictionary,
-    DocString, RuntimeAccessible
+    DocString,
 } from "../joiner";
 import {
     Log,
@@ -41,9 +41,12 @@ import {
     Constructors,
     store,
     SetFieldAction,
-    DPointerTargetable, ShortAttribETypes, toLongEType, DState, Debug
+    DPointerTargetable, ShortAttribETypes, toLongEType, DState, Debug,
+    RuntimeAccessible,
+    Uarr, GenericType,
 } from "../joiner";
 import {DefaultEClasses, ShortDefaultEClasses, toLongEClass} from "../common/U";
+// import {TypeDeclaration} from "../model/logicWrapper/etype";
 type RET<T = boolean> = T | Promise<T>;
 /*
 
@@ -399,7 +402,7 @@ export class EcoreParser{
         // dObject.name = json[ECoreNamed.namee] as string || "imported_metamodel_1";
         console.log("made model 2", children, annotations);
         for (let child of annotations) {
-            EcoreParser.parseDAnnotation(dObject, child, generated, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+            EcoreParser.parseDAnnotation(dObject, child, generated);
         }
         console.log("made annotations");
         for (let child of children) {
@@ -581,7 +584,7 @@ export class EcoreParser{
         return generated;
     }
 
-    static parseDAnnotation(parent: DModelElement, json: Json, generated: DModelElement[], fullnamePrefix: string): DModelElement[] {
+    static parseDAnnotation(parent: DModelElement, json: Json, generated: DModelElement[], fullnamePrefix: string = ''): DModelElement[] {
         return []; // todo
         if (!generated) generated = [];
         if (!json) { json = {}; }
@@ -611,6 +614,31 @@ export class EcoreParser{
         // for (let i = 0; i < details.length; i++) { new EAnnotationDetail(this, details[i]); }
         return generated; }
 
+    static parseTypeDeclaration(parent: DModelElement, json: Json, generated: DModelElement[]): DModelElement[] {
+        if (!generated) generated = [];
+        if (!json) { json = {}; }
+        // nb: this is wrong if json is a xmi structure instead of a jom, check it.
+        const model = LPointerTargetable.fromD(parent).model;
+        const classes = model.classes;
+        const enums = model.enums;
+        const typeDeclarations = model.typeDeclarations;
+        const str = GenericType.serializeETypeParameter([json as any], model, true);
+        const typeDecl = str ? GenericType.parseDeclaration(str, classes, enums, typeDeclarations) : null;
+        if (!typeDecl) {
+            Log.ee("Failed to parse typeDeclaration", json);
+            return generated;
+        }
+        const ret = windoww.TypeDeclaration.toD(typeDecl);
+        generated.push(ret);
+        for (let v of Uarr.normalizeArray(json.anotations)) {
+            if (typeof v !== "object") { continue; }
+            // let subdObject: DObject = DObject.new((meta as LReference)?.type.id, parent.id, DValue, undefined);
+            // generated.push(subdObject);
+            // NB: annotations are added to collection in parseDannotation using parent.annotations = this;
+            EcoreParser.parseDAnnotation(ret, v, generated);
+        }
+        return generated;
+    }
     static parseRootPackage(parent: DModel, json: Json, generated: DModelElement[]): DModelElement[] {
         if (!generated) generated = [];
         if (!json) { json = {}; }
@@ -896,7 +924,8 @@ export class EcoreParser{
     private static getAnnotations(thiss: Json): Json[] {
         const ret: any = thiss[ECorePackage.eAnnotations];
         if (!ret || U.isEmptyObject(ret)) { return []; }
-        if (Array.isArray(ret)) { return ret; } else { return [ret]; } }
+        if (Array.isArray(ret)) { return ret; } else { return [ret]; }
+    }
 
     private static getDetails(thiss: Json): Json[] {
         const ret: any = thiss[ECoreAnnotation.details];
@@ -974,6 +1003,13 @@ export class ECoreAnnotation {
     static source: string;
     static references: string;
     static details: string;
+}
+
+@RuntimeAccessible('EcoreTypeDeclaration')
+export class EcoreTypeDeclaration {
+    static cname = 'EcoreTypeDeclaration';
+    static namee: string;
+    static eBounds: string;
 }
 
 @RuntimeAccessible('ECoreNamed')
@@ -1154,6 +1190,9 @@ ECoreAnnotation.details = 'details'; // arr
 ECoreDetail.key = EcoreParser.XMLinlineMarker + 'key'; // can have spaces
 ECoreDetail.value = EcoreParser.XMLinlineMarker + 'value';
 
+EcoreTypeDeclaration.eBounds = EcoreParser.XMLinlineMarker + 'eBounds';
+EcoreTypeDeclaration.namee = EcoreParser.XMLinlineMarker + 'name';
+
 ECorePackage.eSubpackages = 'eSubpackages';
 ECorePackage.eClassifiers = 'eClassifiers';
 ECorePackage.xmlnsxmi = EcoreParser.XMLinlineMarker + 'xmlns:xmi'; // typical value: http://www.omg.org/XMI
@@ -1262,6 +1301,7 @@ export const EcoreXmiTags = [
 export const allEcoreKeys: Dictionary<string, string> = {
     ...ECoreRoot,
     ...ECoreAnnotation,
+    ...EcoreTypeDeclaration,
     ...ECoreNamed,
     ...ECoreDetail,
     ...ECoreSubPackage,

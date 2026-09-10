@@ -1,4 +1,14 @@
-import {Pointer, DViewElement, DViewPoint, Dictionary, U, RuntimeAccessible, DClass, DTypeDeclaration} from '../joiner';
+import {
+    Pointer,
+    DViewElement,
+    DViewPoint,
+    Dictionary,
+    U,
+    RuntimeAccessible,
+    DClass,
+    DTypeDeclaration,
+    AttribETypes, ShortAttribETypes, Alias
+} from '../joiner';
 @RuntimeAccessible('Defaults')
 export class Defaults { /// TODO: this really needs to become dynamically generated, after view creations.
     static cname: string = 'Defaults';
@@ -103,6 +113,10 @@ export class Defaults { /// TODO: this really needs to become dynamically genera
 
     static check(id: Pointer): boolean {
         return !!(Defaults.defaultViewsMap[id] || Defaults.defaultViewPointsMap[id] || Defaults.defaultTypesMap[id]); // id.indexOf('Pointer_View') !== -1
+    }
+
+    @Alias primitiveToPointer(s: AttribETypes | ShortAttribETypes | string): Pointer<DClass> {
+        return U.solveEcoreType(s, true, '', '');
     }
 
 }

@@ -2373,19 +2373,19 @@ export class LPointerTargetable<Context extends LogicContext<DPointerTargetable>
             let bytes = 0;
             let type: string = isSymbol ? '' : (this as any)["__info_of__"+(k as string)]?.type;
             if (type) type = U.multiReplaceAll(type, ["array", "Array", "<", ">", "[]"], []);
-            switch(type){
-                case ShortAttribETypes.EDate: break;
+            switch (type) {
                 default: break;
+                case ShortAttribETypes.EDate: break;
                 case ShortAttribETypes.EBoolean: v = !!v; break;
-                case ShortAttribETypes.EByte: bytes = 8; break;
-                case ShortAttribETypes.EShort: bytes = 16; break;
-                case ShortAttribETypes.EInt: bytes = 32; break;
-                case ShortAttribETypes.ELong: bytes = 64; break;
-                case ShortAttribETypes.EString: v = ""+v; break;
-                case ShortAttribETypes.EChar: v = (""+v)[0]; break;
-                case ShortAttribETypes.EVoid: Log.exx("cannot set a void-typed value", {c, d:c.data, k, v}); return true;
+                case ShortAttribETypes.EByte:    bytes = 8; break;
+                case ShortAttribETypes.EShort:   bytes = 16; break;
+                case ShortAttribETypes.EInt:     bytes = 32; break;
+                case ShortAttribETypes.ELong:    bytes = 64; break;
+                case ShortAttribETypes.EString:  v = ""+v; break;
+                case ShortAttribETypes.EChar:    v = (""+v)[0]; break;
                 case ShortAttribETypes.EDouble:
-                case ShortAttribETypes.EFloat: v = +v; break;
+                case ShortAttribETypes.EFloat:   v = +v; break;
+                case ShortAttribETypes.EVoid:    Log.exx("cannot set a void-typed value", {c, d:c.data, k, v}); return true;
             }
             if (bytes) {
                 v = Math.round(+v);

@@ -243,7 +243,7 @@ function deepCopyButOnlyFollowingPath(oldStateDoNotModify: DState, action: Parse
                 if (typeof newVal === 'string') { let tmp: any = {}; tmp[newVal] = true; newVal = tmp; }
                 oldValue = {...current[key]};
 
-                if (newVal.__jjObjDiffDeltaRoot) {
+                if (newVal?.__jjObjDiffDeltaRoot) {
                     if (!U.isEmptyObject(newVal)) {
                         current[key] = Uobj.applyObjectDelta(current[key], newVal, false);
                         gotChanged = true;
@@ -263,7 +263,7 @@ function deepCopyButOnlyFollowingPath(oldStateDoNotModify: DState, action: Parse
                 if (action.isPointer && Pointers.isPointer(key)) newRoot = PointedBy.add(key as Pointer, action, newRoot, "+=");
             } else
             if (isObjectDifference) {
-                if (newVal.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
+                if (newVal?.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
                 if (typeof newVal === 'string') newVal = {[newVal]: true};
                 oldValue = {...current[key]};
                 current[key] = {...current[key]};
@@ -278,7 +278,7 @@ function deepCopyButOnlyFollowingPath(oldStateDoNotModify: DState, action: Parse
                 if (action.isPointer && Pointers.isPointer(key)) newRoot = PointedBy.add(key as Pointer, action, newRoot, "-=");
             }
             else if (isArrayAppend) {
-                if (newVal.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
+                if (newVal?.__jjObjDiffDeltaRoot) Log.eDevv("object delta in reducer can only be used with {} object merger modifier.", action);
                 gotChanged = true;
                 if (allowFixingNullArr && !Array.isArray(current[key])) { current[key] = []; }
                 if (!Array.isArray(current[key])) break;

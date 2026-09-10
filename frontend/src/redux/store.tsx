@@ -148,6 +148,7 @@ export class DState extends DPointerTargetable{
     placeholders: Pointer<DPlaceholder>[] = [];
     ecoreClasses: Pointer<DClass, 0, "N"> = [];
     returnTypes: Pointer<DClass, 0, "N"> = [];
+
     /// DClass section end
 
     isEdgePending: {user: Pointer<DUser>, source: Pointer<DClass>} = {user: '', source: ''};

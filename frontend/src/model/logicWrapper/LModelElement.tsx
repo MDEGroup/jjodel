@@ -99,7 +99,7 @@ import React, {JSX} from "react";
 import {Dummy} from "../../common/Dummy";
 import {TRANSACTION_MERGE} from "../../redux/action/action";
 import {DictArr} from "../../joiner/types";
-import {TypeDeclaration} from "./etype";
+import {getClassifiers, TypeDeclaration} from "./etype";
 
 type outactions = {clear:(()=>void)[], set:(()=>void)[], immediatefire?: boolean};
 export type SchemaMatchingScore = {
@@ -458,7 +458,10 @@ export class LModelElement<Context extends LogicContext<DModelElement> = any, D 
 
                 case "values": if (!Array.isArray(v)) { delete ecore[k]; ecore.value = v; } break;
                 //  eliteral.value === "@value". same as "@value" for m1 features, ambiguous
-                case "value": if (Array.isArray(v)) { delete ecore[k]; if (v.length) ecore.values = v; } break;
+                case "value":
+                    delete ecore[k]; ecore.value = number(v);
+                    // if (Array.isArray(v)) { delete ecore[k]; if (v.length) ecore.values = v; }
+                    break;
 
                 // common properties
                 case 'xsitype': case 'xsi:type':
@@ -1439,9 +1442,8 @@ export class LAnnotation<Context extends LogicContext<DAnnotation> = any, D exte
         if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
         loopDetectionObj[c.data.id] = c.data;
         const json: Json = {};
-        LModelElement.generateEcoreJson_impl(c, json, loopDetectionObj, deep, crossRef, metadata, this);
         EcoreParser.write(json, ECoreAnnotation.source, c.data.source);
-        // EcoreParser.write(json, ECoreAnnotation.references, context.proxyObject.referencesStr);
+        // EcoreParser.write(json, ECoreAnnotation.references, context.proxyObject.referencesStr); todo
         // keep sub-elements last
         if (c.data.details) EcoreParser.write(json, ECoreAnnotation.details, c.data.details);
         return json;
@@ -1681,7 +1683,7 @@ class LTypedElement<Context extends LogicContext<DTypedElement> = any> extends L
     // personal
     type!: LClassifier;
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
     __info_of__genericType = GenericType.desc_feature;
 
@@ -2907,7 +2909,7 @@ export class LOperation<Context extends LogicContext<DOperation, LOperation> = a
 
     // generic types
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
     __info_of__genericType = GenericType.desc_feature;
 
@@ -3136,7 +3138,7 @@ export class LParameter<Context extends LogicContext<DParameter> = any, C extend
 
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     __info_of__genericType = GenericType.desc_feature;
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
     protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
@@ -3380,7 +3382,7 @@ export class LClass<D extends DClass = DClass, Context extends LogicContext<DCla
 
     genericSuperTypes!: GenericType[]; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     __info_of__genericSuperTypes = GenericType.desc_class;
-    get_genericSuperTypes(c: Context): this["genericType"] { return GenericType.getterArr(c.data.genericSuperTypes); }
+    get_genericSuperTypes(c: Context): this["genericSuperTypes"] { return GenericType.getterArr(c.data.genericSuperTypes, c as any as LogicContext); }
     set_genericSuperTypes(v: this["genericType"], c: Context): boolean { return GenericType.setterArr(v, c, "genericSuperTypes", this); }
 
 
@@ -4644,12 +4646,19 @@ export class LTypeDeclaration<D extends DTypeDeclaration = DTypeDeclaration, Con
         return GenericType.serializeTypeDeclarationJOM(c.proxyObject, true);
     }
 
+    typeDeclarations!: LTypeDeclaration[];
+    __info_of__typeDeclarations: Info = Info.typeDeclarations;
+    public get_typeDeclarations(c: Context) { return this.get_father(c).typeDeclarations; }
+    public set_typeDeclarations(v: never, c: Context): boolean { return this.cannotSet("typeDeclarations"); }
     public parse(s: string): this { throw this.wrongAccessMessage("parse"); }
-    __info_of__parse: Info = {type: "(text)=>this", txt: "parses a java-like string which includes the constraints and the name of the type declaration and updates the object."}
-    protected get_parse(c: Context): (s: string) => this {
+    __info_of__parse: Info = {type: "(text)=>this",
+        txt: "parses a java-like string which includes the constraints and the name of the type declaration and updates the object." +
+            "\nA return of null means the string was invalid and the typeDeclaration remained unchanged."}
+    protected get_parse(c: Context): (s: string) => this | null {
         return (s: string) => {
             let lm = this.get_model(c);
-            let td: TypeDeclaration = GenericType.parseDeclaration(s, lm.classes, lm.enums, this.get_father(c)?.typeDeclarations || [] as any, c.proxyObject);
+            let td: TypeDeclaration | null = GenericType.parseDeclaration(s, lm.classes, lm.enums, this.get_father(c)?.typeDeclarations || [] as any);
+            if (!td) return null;
             let d = c.data;
             console.error("parseDeclaration", {s, td, d});
             TRANSACTION("update type declaration", ()=> {
@@ -4697,7 +4706,7 @@ export class LTypeDeclaration<D extends DTypeDeclaration = DTypeDeclaration, Con
         if (ptr) v = ptr;
         else {
             if (!v) v = undefined;
-            else if (typeof v === "object") v = GenericType.getter(v) || undefined;
+            else if (typeof v === "object") v = GenericType.getter(v, c as any as LogicContext) || undefined;
             else return true; // error: not a pointer, L, GenericType or null (delete old value)
             let delta = v && old ? Uobj.objectDelta(v as GObject, old) : undefined;
             if (delta && Object.keys(delta).length === 0) return true;
@@ -4748,6 +4757,21 @@ export class LTypeDeclaration<D extends DTypeDeclaration = DTypeDeclaration, Con
         }, c.data.direction, v);
         return true;
     }
+
+    protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
+                                     deep: boolean = true, crossRef: boolean = true, metadata: boolean = false): Json {
+        if (loopDetectionObj[c.data.id]) return Log.exx('Cannot serialize in ecore, found loop', {loopDetectionObj, c});
+        loopDetectionObj[c.data.id] = c.data;
+        const {m, classes, enums, typeDecls} = getClassifiers(c);
+        return GenericType.parseToEcoreDeclaration(c.proxyObject, classes, enums, typeDecls) as any || {};
+        /*const json: Json = {};
+        EcoreParser.write(json, EcoreTypeDeclaration.source, c.data.source);
+        // EcoreParser.write(json, ECoreAnnotation.references, context.proxyObject.referencesStr);
+        // keep sub-elements last
+        if (c.data.details) EcoreParser.write(json, ECoreAnnotation.details, c.data.details);
+        return json;*/
+    }
+
 }
 RuntimeAccessibleClass.set_extend(DClassifier, DTypeDeclaration);
 RuntimeAccessibleClass.set_extend(LClassifier, LTypeDeclaration);
@@ -4940,7 +4964,7 @@ export class LReference<Context extends LogicContext<DReference> = any, C extend
 
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     __info_of__genericType = GenericType.desc_feature;
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
     type!: LClass;
@@ -5375,7 +5399,7 @@ export class LAttribute <Context extends LogicContext<DAttribute> = any, C exten
 
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     __info_of__genericType = GenericType.desc_feature;
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
     protected generateEcoreJson_impl(c: Context, loopDetectionObj: Dictionary<Pointer, DModelElement> = {},
@@ -6542,7 +6566,10 @@ instanceof === undefined or missing  --> auto-detect and assign the type
     }
 
     public duplicate(deep: boolean = true): this { return this.cannotCall("duplicate"); }
-    protected get_duplicate(deep: boolean = true): this { throw new Error("Model.duplicate(): use export/import ecore instead."); }
+    protected get_duplicate(c: Context): (deep?:boolean)=>LModel { return (deep: boolean = true) => {
+        Log.ee("Model.duplicate(): use export/import ecore instead.");
+        return c.proxyObject;
+    } }
 
     set_instanceof(val: Pack1<this["instanceof"]>, c: Context): boolean {
         let ptr = Pointers.from<DNamedElement>(val as any);// as (undefined | Pointer<DNamedElement>);
@@ -7635,7 +7662,7 @@ export class LValue<Context extends LogicContext<DValue> = any, C extends Contex
     type!: LClassifier; // Classifiers describing PrimitiveTypes or the classes that can be pointed.
     genericType?: GenericType; // eg: type<T extends BOUND1, T extends BOUND2, ....>
     __info_of__genericType = GenericType.desc_value;
-    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType); }
+    get_genericType(c: Context): this["genericType"] { return GenericType.getter(c.data.genericType, c as any as LogicContext) || undefined; }
     set_genericType(v: GenericType, c: Context): boolean { return GenericType.setter(v, c, this); }
 
     primitiveType!: LClass;
